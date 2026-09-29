@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.0.0
-// @description  Crea notas Markdown manuales y las guarda como archivos .md en una carpeta local elegida por el usuario.
+// @version      1.1.0
+// @description  Panel lateral persistente para tomar notas Markdown por conversación y guardar cambios en una carpeta local.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
 // @run-at       document-idle
@@ -14,20 +14,30 @@
 
   const APP = 'tm-chatgpt-markdown-notes';
   const DB_NAME = `${APP}-db`;
-  const DB_VERSION = 1;
-  const STORE_NAME = 'handles';
+  const DB_VERSION = 2;
+
+  const HANDLE_STORE = 'handles';
+  const DRAFT_STORE = 'drafts';
   const DIRECTORY_KEY = 'notes-directory';
 
-  let directoryHandle = null;
-  let modal = null;
-  let widget = null;
-  let saving = false;
+  const PANEL_OPEN_KEY = `${APP}:panel-open`;
+  const NEW_CHAT_SESSION_KEY = `${APP}:new-chat-session-key`;
 
-  // ---------------------------------------------------------------------------
-  // IndexedDB: persiste el FileSystemDirectoryHandle entre recargas.
-  // @grant none es intencional: mantiene acceso directo a las Web APIs de la
-  // página, incluido showDirectoryPicker() en navegadores Chromium compatibles.
-  // ---------------------------------------------------------------------------
+  let directoryHandle = null;
+  let panel = null;
+  let launcher = null;
+
+  let activeChatKey = null;
+  let activeState = null;
+
+  let saving = false;
+  let draftSaveTimer = null;
+  let navigationTimer = null;
+  let titleTimer = null;
+
+  // ===========================================================================
+  // IndexedDB
+  // ===========================================================================
 
   function openDb() {
     return new Promise((resolve, reject) => {
@@ -35,8 +45,13 @@
 
       request.onupgradeneeded = () => {
         const db = request.result;
-        if (!db.objectStoreNames.contains(STORE_NAME)) {
-          db.createObjectStore(STORE_NAME);
+
+        if (!db.objectStoreNames.contains(HANDLE_STORE)) {
+          db.createObjectStore(HANDLE_STORE);
+        }
+
+        if (!db.objectStoreNames.contains(DRAFT_STORE)) {
+          db.createObjectStore(DRAFT_STORE);
         }
       };
 
@@ -45,12 +60,13 @@
     });
   }
 
-  async function idbGet(key) {
+  async function idbGet(storeName, key) {
     const db = await openDb();
+
     try {
       return await new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readonly');
-        const store = tx.objectStore(STORE_NAME);
+        const tx = db.transaction(storeName, 'readonly');
+        const store = tx.objectStore(storeName);
         const request = store.get(key);
 
         request.onsuccess = () => resolve(request.result ?? null);
@@ -61,70 +77,261 @@
     }
   }
 
-  async function idbSet(key, value) {
+  async function idbSet(storeName, key, value) {
     const db = await openDb();
+
     try {
       await new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        const store = tx.objectStore(STORE_NAME);
+        const tx = db.transaction(storeName, 'readwrite');
+        const store = tx.objectStore(storeName);
+
         store.put(value, key);
 
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error || new Error('Transacción IndexedDB abortada'));
+        tx.onabort = () => reject(
+          tx.error || new Error('La transacción de IndexedDB fue abortada.')
+        );
       });
     } finally {
       db.close();
     }
   }
 
-  async function idbDelete(key) {
+  async function idbDelete(storeName, key) {
     const db = await openDb();
+
     try {
       await new Promise((resolve, reject) => {
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        const store = tx.objectStore(STORE_NAME);
+        const tx = db.transaction(storeName, 'readwrite');
+        const store = tx.objectStore(storeName);
+
         store.delete(key);
 
         tx.oncomplete = () => resolve();
         tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error || new Error('Transacción IndexedDB abortada'));
+        tx.onabort = () => reject(
+          tx.error || new Error('La transacción de IndexedDB fue abortada.')
+        );
       });
     } finally {
       db.close();
     }
   }
 
-  async function loadSavedDirectoryHandle() {
-    try {
-      const saved = await idbGet(DIRECTORY_KEY);
-      if (saved && saved.kind === 'directory') {
-        directoryHandle = saved;
-      }
-    } catch (error) {
-      console.warn('[ChatGPT Markdown Notes] No se pudo recuperar la carpeta guardada:', error);
-    }
+  // ===========================================================================
+  // Conversación y título
+  // ===========================================================================
 
-    updateFolderUi();
+  function getChatId() {
+    const match = location.pathname.match(/\/c\/([^/?#]+)/);
+    return match ? match[1] : null;
   }
 
-  // ---------------------------------------------------------------------------
+  function getOrCreateNewChatSessionKey() {
+    let value = sessionStorage.getItem(NEW_CHAT_SESSION_KEY);
+
+    if (!value) {
+      const suffix = typeof crypto?.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+      value = `new:${suffix}`;
+      sessionStorage.setItem(NEW_CHAT_SESSION_KEY, value);
+    }
+
+    return value;
+  }
+
+  function getCurrentChatKey() {
+    const chatId = getChatId();
+    return chatId ? `chat:${chatId}` : getOrCreateNewChatSessionKey();
+  }
+
+  function normalizeTitle(value) {
+    return String(value || '')
+      .replace(/\s+/g, ' ')
+      .replace(/\s*[-|·]\s*ChatGPT\s*$/i, '')
+      .trim();
+  }
+
+  function isGenericTitle(value) {
+    const title = normalizeTitle(value).toLowerCase();
+
+    return (
+      !title ||
+      title === 'chatgpt' ||
+      title === 'nuevo chat' ||
+      title === 'new chat' ||
+      title === 'chat'
+    );
+  }
+
+  function titleFromSidebarLink() {
+    const currentPath = location.pathname;
+
+    for (const anchor of document.querySelectorAll('a[href]')) {
+      try {
+        const url = new URL(anchor.href, location.href);
+        if (url.pathname !== currentPath) continue;
+
+        const text = normalizeTitle(anchor.textContent);
+        if (!isGenericTitle(text)) return text;
+      } catch {
+        // Ignorar href inválido.
+      }
+    }
+
+    return '';
+  }
+
+  function titleFromHeading() {
+    const selectors = [
+      '[data-testid="conversation-title"]',
+      '[data-testid="chat-title"]',
+      'main h1'
+    ];
+
+    for (const selector of selectors) {
+      const el = document.querySelector(selector);
+      const text = normalizeTitle(el?.textContent);
+
+      if (!isGenericTitle(text)) return text;
+    }
+
+    return '';
+  }
+
+  function getDetectedChatTitle() {
+    const candidates = [
+      titleFromSidebarLink(),
+      titleFromHeading(),
+      normalizeTitle(document.title)
+    ];
+
+    for (const candidate of candidates) {
+      if (!isGenericTitle(candidate)) return candidate;
+    }
+
+    return 'Nota de ChatGPT';
+  }
+
+  function getChatUrl() {
+    const chatId = getChatId();
+
+    return chatId
+      ? `${location.origin}/c/${chatId}`
+      : `${location.origin}${location.pathname}`;
+  }
+
+  // ===========================================================================
+  // Estado persistente del borrador
+  // ===========================================================================
+
+  function createEmptyState() {
+    return {
+      body: '',
+      savedBody: '',
+      noteTitle: null,
+      filename: null,
+      createdAt: null,
+      lastSavedAt: null,
+      updatedAt: new Date().toISOString()
+    };
+  }
+
+  function normalizeState(value) {
+    const base = createEmptyState();
+
+    if (!value || typeof value !== 'object') return base;
+
+    return {
+      body: typeof value.body === 'string' ? value.body : '',
+      savedBody: typeof value.savedBody === 'string' ? value.savedBody : '',
+      noteTitle: typeof value.noteTitle === 'string' && value.noteTitle.trim()
+        ? value.noteTitle
+        : null,
+      filename: typeof value.filename === 'string' && value.filename.trim()
+        ? value.filename
+        : null,
+      createdAt: typeof value.createdAt === 'string' ? value.createdAt : null,
+      lastSavedAt: typeof value.lastSavedAt === 'string' ? value.lastSavedAt : null,
+      updatedAt: typeof value.updatedAt === 'string'
+        ? value.updatedAt
+        : new Date().toISOString()
+    };
+  }
+
+  async function loadState(chatKey) {
+    return normalizeState(await idbGet(DRAFT_STORE, chatKey));
+  }
+
+  async function persistActiveState() {
+    if (!activeChatKey || !activeState) return;
+
+    activeState.updatedAt = new Date().toISOString();
+    await idbSet(DRAFT_STORE, activeChatKey, activeState);
+  }
+
+  function scheduleDraftPersistence() {
+    clearTimeout(draftSaveTimer);
+
+    draftSaveTimer = window.setTimeout(async () => {
+      try {
+        await persistActiveState();
+        updateStatus();
+      } catch (error) {
+        console.error('[ChatGPT Markdown Notes] Error al persistir borrador:', error);
+        setStatus('No se pudo persistir el borrador local.', 'error');
+      }
+    }, 300);
+  }
+
+  function isDirty() {
+    return Boolean(activeState && activeState.body !== activeState.savedBody);
+  }
+
+  function currentNoteTitle() {
+    return activeState?.noteTitle || getDetectedChatTitle();
+  }
+
+  function currentFilename() {
+    if (activeState?.filename) return activeState.filename;
+    return `${slugify(currentNoteTitle())}.md`;
+  }
+
+  // ===========================================================================
   // File System Access API
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
 
   function supportsFileSystemAccess() {
     return typeof window.showDirectoryPicker === 'function';
   }
 
-  async function chooseDirectory() {
-    if (!supportsFileSystemAccess()) {
-      throw new Error(
-        'Este navegador no expone showDirectoryPicker(). Usa Chrome/Edge u otro navegador Chromium compatible.'
+  async function loadSavedDirectoryHandle() {
+    try {
+      const handle = await idbGet(HANDLE_STORE, DIRECTORY_KEY);
+
+      if (handle?.kind === 'directory') {
+        directoryHandle = handle;
+      }
+    } catch (error) {
+      console.warn(
+        '[ChatGPT Markdown Notes] No se pudo recuperar la carpeta guardada:',
+        error
       );
     }
 
-    // call(window, ...) evita problemas de "Illegal invocation" en algunos
-    // entornos donde la función pierde su receptor Window.
+    renderFolder();
+  }
+
+  async function chooseDirectory() {
+    if (!supportsFileSystemAccess()) {
+      throw new Error(
+        'Este navegador no expone showDirectoryPicker(). Usa Chrome o Edge en escritorio.'
+      );
+    }
+
     const handle = await window.showDirectoryPicker.call(window, {
       id: 'chatgpt-markdown-notes',
       mode: 'readwrite',
@@ -132,10 +339,16 @@
     });
 
     directoryHandle = handle;
-    await idbSet(DIRECTORY_KEY, handle);
-    updateFolderUi();
+    await idbSet(HANDLE_STORE, DIRECTORY_KEY, handle);
+    renderFolder();
 
     return handle;
+  }
+
+  async function forgetDirectory() {
+    directoryHandle = null;
+    await idbDelete(HANDLE_STORE, DIRECTORY_KEY);
+    renderFolder();
   }
 
   async function ensureWritePermission(handle) {
@@ -143,67 +356,37 @@
 
     const options = { mode: 'readwrite' };
 
-    // requestPermission() se ejecuta directamente desde el click/atajo del
-    // usuario. Si el permiso ya estaba concedido, normalmente retorna
-    // "granted" sin volver a preguntar.
+    if (typeof handle.queryPermission === 'function') {
+      const state = await handle.queryPermission(options);
+
+      if (state === 'granted') return true;
+    }
+
     if (typeof handle.requestPermission === 'function') {
       const state = await handle.requestPermission(options);
       return state === 'granted';
     }
 
-    if (typeof handle.queryPermission === 'function') {
-      return (await handle.queryPermission(options)) === 'granted';
-    }
-
-    // Navegadores antiguos: dejamos que la escritura determine si hay permiso.
     return true;
   }
 
-  async function forgetDirectory() {
-    directoryHandle = null;
-    await idbDelete(DIRECTORY_KEY);
-    updateFolderUi();
-  }
-
-  async function fileExists(dir, filename) {
-    try {
-      await dir.getFileHandle(filename);
-      return true;
-    } catch (error) {
-      if (error?.name === 'NotFoundError') return false;
-      throw error;
-    }
-  }
-
-  async function uniqueFilename(dir, desiredFilename) {
-    if (!(await fileExists(dir, desiredFilename))) return desiredFilename;
-
-    const dot = desiredFilename.toLowerCase().endsWith('.md') ? desiredFilename.length - 3 : -1;
-    const base = dot >= 0 ? desiredFilename.slice(0, dot) : desiredFilename;
-    const ext = dot >= 0 ? '.md' : '';
-
-    for (let i = 2; i < 10000; i += 1) {
-      const candidate = `${base}-${i}${ext}`;
-      if (!(await fileExists(dir, candidate))) return candidate;
-    }
-
-    throw new Error('No se pudo generar un nombre de archivo único.');
-  }
-
-  async function writeTextFile(dir, filename, text) {
+  async function writeMarkdownFile(dir, filename, content) {
+    // getFileHandle(..., { create: true }) abre el mismo archivo si existe.
+    // createWritable() escribe sobre ese archivo, por lo que Guardar funciona
+    // como "guardar cambios", no como "crear una copia".
     const fileHandle = await dir.getFileHandle(filename, { create: true });
     const writable = await fileHandle.createWritable();
 
     try {
-      await writable.write(text);
+      await writable.write(content);
     } finally {
       await writable.close();
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Markdown / metadata
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
+  // Markdown
+  // ===========================================================================
 
   function pad(value) {
     return String(value).padStart(2, '0');
@@ -213,6 +396,7 @@
     const offsetMinutes = -date.getTimezoneOffset();
     const sign = offsetMinutes >= 0 ? '+' : '-';
     const abs = Math.abs(offsetMinutes);
+
     const offsetHours = Math.floor(abs / 60);
     const offsetRemainder = abs % 60;
 
@@ -243,9 +427,8 @@
       .slice(0, 120)
       .replace(/-+$/g, '');
 
-    if (!slug) slug = 'nota';
+    if (!slug) slug = 'nota-chatgpt';
 
-    // Nombres reservados comunes de Windows, por portabilidad.
     if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(slug)) {
       slug = `nota-${slug}`;
     }
@@ -253,272 +436,227 @@
     return slug;
   }
 
-  function getChatContext() {
-    const match = location.pathname.match(/\/c\/([^/?#]+)/);
-    const chatId = match ? match[1] : null;
-    const chatUrl = chatId
-      ? `${location.origin}/c/${chatId}`
-      : `${location.origin}${location.pathname}`;
+  function buildMarkdown() {
+    const title = currentNoteTitle();
+    const chatId = getChatId();
+    const chatUrl = getChatUrl();
 
-    return { chatId, chatUrl };
-  }
+    const created = activeState.createdAt || localIsoTimestamp();
+    const updated = localIsoTimestamp();
 
-  function buildMarkdown(title, body) {
-    const { chatId, chatUrl } = getChatContext();
-    const created = localIsoTimestamp();
-
-    const metadata = [
+    const lines = [
       '---',
       `title: ${yamlString(title)}`,
       `created: ${yamlString(created)}`,
+      `updated: ${yamlString(updated)}`,
       `source: ${yamlString('ChatGPT')}`,
       chatId ? `chat_id: ${yamlString(chatId)}` : 'chat_id: null',
       `chat_url: ${yamlString(chatUrl)}`,
       '---',
       '',
-      `# ${title.trim()}`,
+      `# ${title}`,
       ''
     ];
 
-    const cleanBody = String(body || '').trim();
-    if (cleanBody) metadata.push(cleanBody, '');
+    const body = String(activeState.body || '').trim();
 
-    return metadata.join('\n');
+    if (body) {
+      lines.push(body, '');
+    }
+
+    return lines.join('\n');
   }
 
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
   // UI
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
 
   function addStyles() {
+    if (document.getElementById(`${APP}-styles`)) return;
+
     const style = document.createElement('style');
     style.id = `${APP}-styles`;
+
     style.textContent = `
-      #${APP}-widget {
+      #${APP}-launcher {
         position: fixed;
-        right: 16px;
+        right: 14px;
         bottom: 62px;
-        z-index: 2147482999;
-        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        z-index: 2147483000;
       }
 
-      #${APP}-widget button {
-        min-height: 34px;
+      #${APP}-launcher button,
+      #${APP}-panel button {
         border: 1px solid rgba(127,127,127,.28);
-        border-radius: 10px;
-        padding: 0 11px;
-        background: rgba(30,30,30,.94);
-        color: #fff;
-        box-shadow: 0 8px 28px rgba(0,0,0,.22);
-        backdrop-filter: blur(10px);
+        border-radius: 9px;
+        background: #2b2c2f;
+        color: #f5f5f5;
         cursor: pointer;
         font: 600 12px/1 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
 
-      #${APP}-modal[hidden] {
-        display: none !important;
+      #${APP}-launcher button {
+        min-height: 36px;
+        padding: 0 12px;
+        box-shadow: 0 8px 30px rgba(0,0,0,.28);
       }
 
-      #${APP}-modal {
+      #${APP}-panel {
         position: fixed;
-        inset: 0;
-        z-index: 2147483641;
-        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
-
-      #${APP}-modal .tmn-backdrop {
-        position: absolute;
-        inset: 0;
-        background: rgba(0,0,0,.56);
-      }
-
-      #${APP}-modal .tmn-dialog {
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        width: min(860px, calc(100vw - 32px));
-        max-height: min(860px, calc(100vh - 32px));
+        top: 8px;
+        right: 8px;
+        bottom: 8px;
+        width: min(430px, calc(100vw - 24px));
+        z-index: 2147483001;
         display: flex;
         flex-direction: column;
         overflow: hidden;
-        border: 1px solid rgba(127,127,127,.32);
+        border: 1px solid rgba(127,127,127,.3);
         border-radius: 14px;
         background: #202123;
         color: #f5f5f5;
-        box-shadow: 0 30px 90px rgba(0,0,0,.45);
+        box-shadow: 0 22px 70px rgba(0,0,0,.42);
+        font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       }
 
-      #${APP}-modal .tmn-header,
-      #${APP}-modal .tmn-footer {
+      #${APP}-panel[hidden] {
+        display: none !important;
+      }
+
+      #${APP}-panel .tmn-header {
         display: flex;
-        align-items: center;
         gap: 10px;
-        padding: 14px 16px;
+        align-items: flex-start;
+        padding: 13px 14px 11px;
+        border-bottom: 1px solid rgba(127,127,127,.22);
       }
 
-      #${APP}-modal .tmn-header {
-        border-bottom: 1px solid rgba(127,127,127,.24);
-      }
-
-      #${APP}-modal .tmn-footer {
-        border-top: 1px solid rgba(127,127,127,.24);
-      }
-
-      #${APP}-modal .tmn-body {
-        overflow: auto;
-        padding: 16px;
-      }
-
-      #${APP}-modal .tmn-header strong {
-        font-size: 15px;
-      }
-
-      #${APP}-modal .tmn-close {
-        margin-left: auto;
-      }
-
-      #${APP}-modal label {
-        display: block;
-        margin-bottom: 14px;
-      }
-
-      #${APP}-modal label > span,
-      #${APP}-modal .tmn-label {
-        display: block;
-        margin-bottom: 7px;
-        font-size: 12px;
-        font-weight: 700;
-      }
-
-      #${APP}-modal input,
-      #${APP}-modal textarea {
-        box-sizing: border-box;
-        width: 100%;
-        border: 1px solid rgba(127,127,127,.32);
-        border-radius: 9px;
-        padding: 10px;
-        background: #151617;
-        color: #f5f5f5;
-      }
-
-      #${APP}-modal input {
-        min-height: 38px;
-        font: 13px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
-
-      #${APP}-modal textarea {
-        min-height: 320px;
-        resize: vertical;
-        font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      }
-
-      #${APP}-modal .tmn-meta-row {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-bottom: 14px;
-      }
-
-      #${APP}-modal .tmn-meta-box {
+      #${APP}-panel .tmn-heading {
         min-width: 0;
         flex: 1;
-        border: 1px solid rgba(127,127,127,.25);
-        border-radius: 9px;
-        padding: 9px 10px;
-        background: rgba(255,255,255,.035);
       }
 
-      #${APP}-modal .tmn-meta-title {
-        font-size: 11px;
-        opacity: .62;
-        margin-bottom: 3px;
-      }
-
-      #${APP}-modal .tmn-meta-value {
+      #${APP}-panel .tmn-chat-title {
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        font: 12px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        font-size: 14px;
+        font-weight: 700;
       }
 
-      #${APP}-modal button {
-        min-height: 34px;
-        border: 1px solid rgba(127,127,127,.32);
-        border-radius: 8px;
-        padding: 0 12px;
-        background: #2f3033;
-        color: #f5f5f5;
-        cursor: pointer;
+      #${APP}-panel .tmn-file-name {
+        margin-top: 4px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        opacity: .58;
+        font: 11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       }
 
-      #${APP}-modal button:disabled {
-        opacity: .45;
-        cursor: not-allowed;
-      }
-
-      #${APP}-modal .tmn-folder-actions {
+      #${APP}-panel .tmn-header-actions {
         display: flex;
         gap: 6px;
-        flex-wrap: wrap;
       }
 
-      #${APP}-modal .tmn-status {
+      #${APP}-panel .tmn-header-actions button {
+        width: 32px;
+        height: 32px;
+        padding: 0;
+      }
+
+      #${APP}-panel .tmn-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-bottom: 1px solid rgba(127,127,127,.18);
+      }
+
+      #${APP}-panel .tmn-folder {
+        min-width: 0;
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        opacity: .72;
+        font-size: 11px;
+      }
+
+      #${APP}-panel .tmn-toolbar button {
+        min-height: 30px;
+        padding: 0 9px;
+      }
+
+      #${APP}-panel .tmn-editor-wrap {
+        min-height: 0;
+        flex: 1;
+        display: flex;
+        padding: 10px;
+      }
+
+      #${APP}-panel textarea {
+        box-sizing: border-box;
+        width: 100%;
+        height: 100%;
+        min-height: 180px;
+        resize: none;
+        border: 1px solid rgba(127,127,127,.25);
+        border-radius: 10px;
+        padding: 12px;
+        outline: none;
+        background: #151617;
+        color: #f5f5f5;
+        font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+
+      #${APP}-panel textarea:focus {
+        border-color: rgba(180,180,180,.55);
+      }
+
+      #${APP}-panel .tmn-footer {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px;
+        border-top: 1px solid rgba(127,127,127,.22);
+      }
+
+      #${APP}-panel .tmn-status {
         min-width: 0;
         flex: 1;
         font-size: 11px;
-        opacity: .72;
+        opacity: .7;
       }
 
-      #${APP}-modal .tmn-status[data-kind="error"] {
+      #${APP}-panel .tmn-status[data-kind="error"] {
         color: #ffb4b4;
         opacity: 1;
       }
 
-      #${APP}-modal .tmn-status[data-kind="success"] {
+      #${APP}-panel .tmn-status[data-kind="success"] {
         color: #b7f5c4;
         opacity: 1;
       }
 
-      #${APP}-modal .tmn-save {
-        font-weight: 700;
+      #${APP}-panel .tmn-save {
+        min-height: 34px;
+        padding: 0 12px;
         background: #f5f5f5;
-        color: #111;
+        color: #151515;
+        font-weight: 750;
       }
 
-      #${APP}-toast {
-        position: fixed;
-        right: 16px;
-        bottom: 108px;
-        z-index: 2147483642;
-        max-width: min(420px, calc(100vw - 32px));
-        border: 1px solid rgba(127,127,127,.3);
-        border-radius: 10px;
-        padding: 10px 12px;
-        background: #202123;
-        color: #f5f5f5;
-        box-shadow: 0 12px 38px rgba(0,0,0,.3);
-        font: 12px/1.4 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      #${APP}-panel .tmn-save:disabled {
+        opacity: .5;
+        cursor: default;
       }
 
       @media (max-width: 700px) {
-        #${APP}-widget {
-          right: 10px;
-          bottom: 58px;
-        }
-
-        #${APP}-modal .tmn-dialog {
-          width: calc(100vw - 16px);
-          max-height: calc(100vh - 16px);
-        }
-
-        #${APP}-modal .tmn-meta-row {
-          align-items: stretch;
-          flex-direction: column;
-        }
-
-        #${APP}-modal textarea {
-          min-height: 240px;
+        #${APP}-panel {
+          top: 4px;
+          right: 4px;
+          bottom: 4px;
+          width: calc(100vw - 8px);
         }
       }
     `;
@@ -526,92 +664,80 @@
     document.head.appendChild(style);
   }
 
-  function createWidget() {
-    if (document.getElementById(`${APP}-widget`)) return;
+  function createLauncher() {
+    if (document.getElementById(`${APP}-launcher`)) return;
 
-    widget = document.createElement('div');
-    widget.id = `${APP}-widget`;
-    widget.innerHTML = `<button type="button" title="Crear una nota Markdown">📝 Nota</button>`;
-    document.body.appendChild(widget);
+    launcher = document.createElement('div');
+    launcher.id = `${APP}-launcher`;
 
-    widget.querySelector('button').addEventListener('click', openNoteEditor);
+    launcher.innerHTML = `
+      <button type="button" title="Abrir notas Markdown">📝 Notas</button>
+    `;
+
+    document.body.appendChild(launcher);
+
+    launcher.querySelector('button').addEventListener('click', () => {
+      setPanelOpen(true);
+    });
   }
 
-  function createModal() {
-    if (modal) return;
+  function createPanel() {
+    if (document.getElementById(`${APP}-panel`)) {
+      panel = document.getElementById(`${APP}-panel`);
+      return;
+    }
 
-    modal = document.createElement('div');
-    modal.id = `${APP}-modal`;
-    modal.hidden = true;
+    panel = document.createElement('aside');
+    panel.id = `${APP}-panel`;
+    panel.hidden = true;
 
-    modal.innerHTML = `
-      <div class="tmn-backdrop"></div>
-      <div class="tmn-dialog" role="dialog" aria-modal="true" aria-label="Nueva nota Markdown">
-        <div class="tmn-header">
-          <div>
-            <strong>Nueva nota Markdown</strong>
-            <div style="margin-top:3px;opacity:.62;font-size:11px">
-              Un archivo .md por nota. El contenido lo escribes manualmente.
-            </div>
-          </div>
-          <button class="tmn-close" type="button" title="Cerrar">✕</button>
+    panel.innerHTML = `
+      <div class="tmn-header">
+        <div class="tmn-heading">
+          <div class="tmn-chat-title">Nota de ChatGPT</div>
+          <div class="tmn-file-name">nota-chatgpt.md</div>
         </div>
 
-        <div class="tmn-body">
-          <label>
-            <span>Título</span>
-            <input class="tmn-title" type="text" autocomplete="off" placeholder="Ej. WireGuard host route /32">
-          </label>
-
-          <div class="tmn-meta-row">
-            <div class="tmn-meta-box">
-              <div class="tmn-meta-title">Archivo</div>
-              <div class="tmn-meta-value tmn-filename">nota.md</div>
-            </div>
-
-            <div class="tmn-meta-box">
-              <div class="tmn-meta-title">Carpeta</div>
-              <div class="tmn-meta-value tmn-folder">No seleccionada</div>
-            </div>
-
-            <div class="tmn-folder-actions">
-              <button class="tmn-choose-folder" type="button">Elegir carpeta</button>
-              <button class="tmn-forget-folder" type="button">Olvidar</button>
-            </div>
-          </div>
-
-          <label>
-            <span>Contenido Markdown</span>
-            <textarea class="tmn-content" spellcheck="false" placeholder="Escribe aquí tu nota..."></textarea>
-          </label>
+        <div class="tmn-header-actions">
+          <button class="tmn-close" type="button" title="Cerrar panel">✕</button>
         </div>
+      </div>
 
-        <div class="tmn-footer">
-          <div class="tmn-status">⌘/Ctrl + S para guardar</div>
-          <button class="tmn-cancel" type="button">Cancelar</button>
-          <button class="tmn-save" type="button">Guardar .md</button>
-        </div>
+      <div class="tmn-toolbar">
+        <div class="tmn-folder">Carpeta: no configurada</div>
+        <button class="tmn-folder-button" type="button">Carpeta</button>
+        <button class="tmn-forget-folder" type="button" title="Olvidar carpeta configurada">Olvidar</button>
+      </div>
+
+      <div class="tmn-editor-wrap">
+        <textarea
+          class="tmn-editor"
+          spellcheck="false"
+          placeholder="Escribe aquí tus notas en Markdown…"
+        ></textarea>
+      </div>
+
+      <div class="tmn-footer">
+        <div class="tmn-status">Borrador local</div>
+        <button class="tmn-save" type="button">Guardar nota</button>
       </div>
     `;
 
-    document.body.appendChild(modal);
+    document.body.appendChild(panel);
 
-    const title = modal.querySelector('.tmn-title');
-    title.addEventListener('input', updateFilenamePreview);
+    panel.querySelector('.tmn-close').addEventListener('click', () => {
+      setPanelOpen(false);
+    });
 
-    modal.querySelector('.tmn-backdrop').addEventListener('click', closeNoteEditor);
-    modal.querySelector('.tmn-close').addEventListener('click', closeNoteEditor);
-    modal.querySelector('.tmn-cancel').addEventListener('click', closeNoteEditor);
-    modal.querySelector('.tmn-save').addEventListener('click', saveCurrentNote);
+    panel.querySelector('.tmn-folder-button').addEventListener('click', async () => {
+      setStatus('Seleccionando carpeta…');
 
-    modal.querySelector('.tmn-choose-folder').addEventListener('click', async () => {
-      setStatus('Abriendo selector de carpeta…');
       try {
         await chooseDirectory();
-        setStatus(`Carpeta seleccionada: ${directoryHandle.name}`, 'success');
+        setStatus(`Carpeta configurada: ${directoryHandle.name}`, 'success');
       } catch (error) {
         if (error?.name === 'AbortError') {
-          setStatus('Selección de carpeta cancelada.');
+          updateStatus();
         } else {
           console.error('[ChatGPT Markdown Notes] Error al seleccionar carpeta:', error);
           setStatus(error?.message || String(error), 'error');
@@ -619,7 +745,7 @@
       }
     });
 
-    modal.querySelector('.tmn-forget-folder').addEventListener('click', async () => {
+    panel.querySelector('.tmn-forget-folder').addEventListener('click', async () => {
       try {
         await forgetDirectory();
         setStatus('Carpeta olvidada.');
@@ -628,157 +754,316 @@
         setStatus(error?.message || String(error), 'error');
       }
     });
+
+    panel.querySelector('.tmn-save').addEventListener('click', saveFile);
+
+    panel.querySelector('.tmn-editor').addEventListener('input', event => {
+      if (!activeState) return;
+
+      activeState.body = event.target.value;
+      renderSaveButton();
+      updateStatus();
+      scheduleDraftPersistence();
+    });
   }
 
-  function updateFilenamePreview() {
-    if (!modal) return;
-    const title = modal.querySelector('.tmn-title')?.value || '';
-    const el = modal.querySelector('.tmn-filename');
-    if (el) el.textContent = `${slugify(title)}.md`;
+  function setPanelOpen(open) {
+    localStorage.setItem(PANEL_OPEN_KEY, open ? '1' : '0');
+
+    if (panel) panel.hidden = !open;
+    if (launcher) launcher.hidden = open;
+
+    if (open) {
+      panel?.querySelector('.tmn-editor')?.focus();
+    }
   }
 
-  function updateFolderUi() {
-    if (!modal) return;
+  function restorePanelState() {
+    setPanelOpen(localStorage.getItem(PANEL_OPEN_KEY) === '1');
+  }
 
-    const folder = modal.querySelector('.tmn-folder');
-    const forget = modal.querySelector('.tmn-forget-folder');
+  function renderFolder() {
+    if (!panel) return;
 
-    if (folder) folder.textContent = directoryHandle?.name || 'No seleccionada';
-    if (forget) forget.disabled = !directoryHandle;
+    const label = panel.querySelector('.tmn-folder');
+    const forget = panel.querySelector('.tmn-forget-folder');
+
+    if (label) {
+      label.textContent = directoryHandle
+        ? `Carpeta: ${directoryHandle.name}`
+        : 'Carpeta: no configurada';
+    }
+
+    if (forget) {
+      forget.disabled = !directoryHandle;
+    }
+  }
+
+  function renderHeader() {
+    if (!panel) return;
+
+    const title = currentNoteTitle();
+    const filename = currentFilename();
+
+    panel.querySelector('.tmn-chat-title').textContent = title;
+    panel.querySelector('.tmn-file-name').textContent = filename;
+  }
+
+  function renderEditor() {
+    if (!panel || !activeState) return;
+
+    const editor = panel.querySelector('.tmn-editor');
+
+    if (editor.value !== activeState.body) {
+      editor.value = activeState.body;
+    }
+  }
+
+  function renderSaveButton() {
+    if (!panel || !activeState) return;
+
+    const button = panel.querySelector('.tmn-save');
+
+    if (activeState.filename || activeState.lastSavedAt) {
+      button.textContent = 'Guardar cambios';
+    } else {
+      button.textContent = 'Guardar nota';
+    }
+
+    button.disabled = saving;
   }
 
   function setStatus(message, kind = '') {
-    if (!modal) return;
+    if (!panel) return;
 
-    const status = modal.querySelector('.tmn-status');
-    if (!status) return;
-
-    status.textContent = message;
-    status.dataset.kind = kind;
+    const el = panel.querySelector('.tmn-status');
+    el.textContent = message;
+    el.dataset.kind = kind;
   }
 
-  async function openNoteEditor() {
-    createModal();
+  function updateStatus() {
+    if (!activeState || !panel) return;
 
-    if (!directoryHandle) {
-      await loadSavedDirectoryHandle();
-    }
-
-    const title = modal.querySelector('.tmn-title');
-    const content = modal.querySelector('.tmn-content');
-
-    title.value = '';
-    content.value = '';
-    updateFilenamePreview();
-    updateFolderUi();
-    setStatus('⌘/Ctrl + S para guardar');
-
-    modal.hidden = false;
-    requestAnimationFrame(() => title.focus());
-  }
-
-  function closeNoteEditor() {
-    if (saving) return;
-    if (modal) modal.hidden = true;
-  }
-
-  function showToast(message) {
-    document.getElementById(`${APP}-toast`)?.remove();
-
-    const toast = document.createElement('div');
-    toast.id = `${APP}-toast`;
-    toast.textContent = message;
-    document.body.appendChild(toast);
-
-    window.setTimeout(() => toast.remove(), 3500);
-  }
-
-  async function saveCurrentNote() {
-    if (saving || !modal || modal.hidden) return;
-
-    const titleEl = modal.querySelector('.tmn-title');
-    const bodyEl = modal.querySelector('.tmn-content');
-    const saveButton = modal.querySelector('.tmn-save');
-
-    const title = titleEl.value.trim();
-    const body = bodyEl.value;
-
-    if (!title) {
-      setStatus('Escribe un título antes de guardar.', 'error');
-      titleEl.focus();
+    if (saving) {
+      setStatus('Guardando cambios…');
       return;
     }
 
+    if (isDirty()) {
+      setStatus('Cambios sin guardar · borrador persistido localmente');
+      return;
+    }
+
+    if (activeState.lastSavedAt) {
+      setStatus('Guardado', 'success');
+      return;
+    }
+
+    if (activeState.body) {
+      setStatus('Borrador persistido localmente');
+      return;
+    }
+
+    setStatus('Borrador local');
+  }
+
+  function renderAll() {
+    renderHeader();
+    renderEditor();
+    renderFolder();
+    renderSaveButton();
+    updateStatus();
+  }
+
+  // ===========================================================================
+  // Guardar archivo
+  // ===========================================================================
+
+  async function saveFile() {
+    if (saving || !activeState) return;
+
     saving = true;
-    saveButton.disabled = true;
-    setStatus('Preparando guardado…');
+    renderSaveButton();
+    updateStatus();
 
     try {
-      // Si todavía no hay carpeta, el click actual en Guardar sirve como gesto
-      // del usuario para abrir el selector nativo.
       if (!directoryHandle) {
-        setStatus('Selecciona la carpeta donde guardar tus notas…');
+        setStatus('Selecciona la carpeta donde guardar la nota…');
         await chooseDirectory();
       }
 
-      setStatus('Validando permiso de escritura…');
       const allowed = await ensureWritePermission(directoryHandle);
+
       if (!allowed) {
-        throw new Error('No se concedió permiso de escritura para la carpeta seleccionada.');
+        throw new Error(
+          'No se concedió permiso de escritura para la carpeta configurada.'
+        );
       }
 
-      const desired = `${slugify(title)}.md`;
-      const filename = await uniqueFilename(directoryHandle, desired);
-      const markdown = buildMarkdown(title, body);
+      // La identidad del archivo se fija en el primer guardado. A partir de
+      // ahí se reutiliza exactamente el mismo nombre y se sobrescribe.
+      if (!activeState.noteTitle) {
+        activeState.noteTitle = getDetectedChatTitle();
+      }
 
-      setStatus(`Guardando ${filename}…`);
-      await writeTextFile(directoryHandle, filename, markdown);
+      if (!activeState.filename) {
+        activeState.filename = `${slugify(activeState.noteTitle)}.md`;
+      }
 
-      setStatus(`Guardado: ${filename}`, 'success');
-      showToast(`Nota guardada: ${filename}`);
+      if (!activeState.createdAt) {
+        activeState.createdAt = localIsoTimestamp();
+      }
 
-      window.setTimeout(() => {
-        if (modal) modal.hidden = true;
-      }, 350);
+      renderHeader();
+      setStatus(`Guardando cambios en ${activeState.filename}…`);
+
+      await writeMarkdownFile(
+        directoryHandle,
+        activeState.filename,
+        buildMarkdown()
+      );
+
+      activeState.savedBody = activeState.body;
+      activeState.lastSavedAt = localIsoTimestamp();
+
+      await persistActiveState();
+
+      setStatus('Guardado', 'success');
     } catch (error) {
       if (error?.name === 'AbortError') {
-        setStatus('Guardado cancelado.', '');
+        updateStatus();
       } else {
         console.error('[ChatGPT Markdown Notes] Error al guardar:', error);
         setStatus(error?.message || String(error), 'error');
       }
     } finally {
       saving = false;
-      saveButton.disabled = false;
+      renderSaveButton();
+      updateStatus();
     }
   }
 
-  function onGlobalKeyDown(event) {
-    if (!modal || modal.hidden) return;
+  // ===========================================================================
+  // Cambio de conversación / SPA
+  // ===========================================================================
 
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      closeNoteEditor();
+  async function switchToChat(chatKey, previousChatKey = null) {
+    clearTimeout(draftSaveTimer);
+
+    if (previousChatKey && activeState) {
+      try {
+        await idbSet(DRAFT_STORE, previousChatKey, activeState);
+      } catch (error) {
+        console.warn('[ChatGPT Markdown Notes] No se pudo persistir el chat anterior:', error);
+      }
+    }
+
+    // Si estábamos en un chat nuevo sin ID y ChatGPT acaba de asignar /c/<id>,
+    // migramos el borrador temporal al ID definitivo cuando todavía no existe
+    // estado para esa conversación.
+    if (
+      previousChatKey?.startsWith('new:') &&
+      chatKey.startsWith('chat:')
+    ) {
+      const existing = await idbGet(DRAFT_STORE, chatKey);
+
+      if (!existing) {
+        const temporary = await idbGet(DRAFT_STORE, previousChatKey);
+
+        if (temporary) {
+          await idbSet(DRAFT_STORE, chatKey, temporary);
+          await idbDelete(DRAFT_STORE, previousChatKey);
+        }
+      }
+
+      sessionStorage.removeItem(NEW_CHAT_SESSION_KEY);
+    }
+
+    activeChatKey = chatKey;
+    activeState = await loadState(chatKey);
+
+    renderAll();
+  }
+
+  async function checkNavigation() {
+    const currentKey = getCurrentChatKey();
+
+    if (currentKey !== activeChatKey) {
+      const previous = activeChatKey;
+      await switchToChat(currentKey, previous);
       return;
     }
 
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
-      event.preventDefault();
-      event.stopPropagation();
-      saveCurrentNote();
+    // Antes del primer guardado seguimos el título actual de ChatGPT para que
+    // el nombre del archivo se actualice cuando ChatGPT genere/renombre el chat.
+    if (activeState && !activeState.noteTitle) {
+      renderHeader();
     }
   }
 
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
+  // Atajos
+  // ===========================================================================
+
+  function onGlobalKeyDown(event) {
+    const isSave = (event.ctrlKey || event.metaKey) &&
+      event.key.toLowerCase() === 's';
+
+    if (!isSave || !panel || panel.hidden) return;
+
+    const editor = panel.querySelector('.tmn-editor');
+
+    if (event.target !== editor) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    saveFile();
+  }
+
+  // ===========================================================================
   // Bootstrap
-  // ---------------------------------------------------------------------------
+  // ===========================================================================
 
-  addStyles();
-  createWidget();
-  createModal();
-  loadSavedDirectoryHandle();
+  async function bootstrap() {
+    addStyles();
+    createLauncher();
+    createPanel();
 
-  document.addEventListener('keydown', onGlobalKeyDown, true);
+    await loadSavedDirectoryHandle();
 
-  console.info('[ChatGPT Markdown Notes] cargado');
+    activeChatKey = getCurrentChatKey();
+    activeState = await loadState(activeChatKey);
+
+    renderAll();
+    restorePanelState();
+
+    document.addEventListener('keydown', onGlobalKeyDown, true);
+
+    navigationTimer = window.setInterval(() => {
+      checkNavigation().catch(error => {
+        console.error('[ChatGPT Markdown Notes] Error al detectar navegación:', error);
+      });
+    }, 700);
+
+    titleTimer = window.setInterval(() => {
+      if (activeState && !activeState.noteTitle) {
+        renderHeader();
+      }
+    }, 1200);
+
+    window.addEventListener('beforeunload', () => {
+      if (!activeChatKey || !activeState) return;
+
+      // IndexedDB es asíncrono y beforeunload no espera; el borrador normalmente
+      // ya se guardó por debounce. Este intento sólo cubre cambios muy recientes.
+      idbSet(DRAFT_STORE, activeChatKey, activeState).catch(() => {});
+    });
+
+    console.info('[ChatGPT Markdown Notes] v1.1.0 cargado');
+  }
+
+  bootstrap().catch(error => {
+    console.error('[ChatGPT Markdown Notes] Error de inicialización:', error);
+  });
 })();
