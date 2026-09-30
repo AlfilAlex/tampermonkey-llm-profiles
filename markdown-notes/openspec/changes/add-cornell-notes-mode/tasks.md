@@ -9,25 +9,26 @@
 - [x] Define portable Markdown serialization.
 - [x] Define compatibility with existing freeform drafts.
 - [x] Document filesystem and filename compatibility.
-- [ ] Resolve implementation review questions in `design.md` before coding.
+- [x] Resolve implementation review questions in `design.md` before coding.
 
 ## Implementation
 
-- [ ] Extend draft normalization with `noteMode`, Cornell state, and saved Cornell snapshot.
-- [ ] Add `Libre | Cornell | Repaso` mode control.
-- [ ] Implement Cornell block editor with cue and Markdown notes fields.
-- [ ] Implement add, move-up, move-down, and delete actions.
-- [ ] Implement full-width Summary editor.
-- [ ] Implement responsive two-column/stacked rendering.
-- [ ] Implement review mode with hidden notes and explicit reveal.
-- [ ] Implement Cornell Markdown serialization.
-- [ ] Integrate Cornell dirty-state and successful-save snapshot handling.
-- [ ] Preserve existing freeform save path.
-- [ ] Preserve existing editable filename resolution and filesystem permission flow.
-- [ ] Update README and userscript semantic version when implementation is accepted.
+- [x] Extend draft normalization with `noteMode`, Cornell state, and saved Cornell snapshot.
+- [x] Add `Libre | Cornell | Repaso` mode control.
+- [x] Implement Cornell block editor with cue and Markdown notes fields.
+- [x] Implement add, move-up, move-down, and delete actions.
+- [x] Implement full-width Summary editor.
+- [x] Implement responsive two-column/stacked rendering.
+- [x] Implement review mode with hidden notes and explicit reveal.
+- [x] Implement Cornell Markdown serialization.
+- [x] Integrate Cornell dirty-state and successful-save snapshot handling.
+- [x] Preserve existing freeform save path.
+- [x] Preserve existing editable filename resolution and filesystem permission flow.
+- [x] Update README and userscript semantic version to v1.4.0.
 
 ## Validation
 
+- [x] Parse the modified userscript successfully with the V8 JavaScript parser.
 - [ ] Run `node --check markdown-notes/chatgpt-markdown-notes.user.js`.
 - [ ] Validate existing freeform drafts load unchanged.
 - [ ] Validate Cornell draft persistence across reload.
