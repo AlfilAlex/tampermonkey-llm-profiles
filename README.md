@@ -31,14 +31,15 @@ No existe un OpenSpec compartido en la raíz: compartir repositorio no implica c
 - Permite crear perfiles adicionales desde la interfaz.
 - Mantiene ON/OFF y perfil seleccionado por conversación.
 
-### ChatGPT Markdown Notes v1.2.0
+### ChatGPT Markdown Notes v1.3.0
 
 - Panel lateral de notas Markdown persistente por conversación.
 - El panel está acoplado al layout en escritorio: reserva espacio y no tapa los mensajes.
 - Anchura ajustable arrastrando el borde izquierdo; se conserva al recargar.
 - Borrador persistente en IndexedDB.
-- Usa el título del chat para el nombre inicial del archivo.
-- Después del primer guardado, **Guardar cambios** sobrescribe el mismo archivo.
+- El nombre del archivo es editable y se conserva por conversación.
+- Sin nombre manual, usa esta prioridad: título del chat → ID del chat → fecha/hora local (`YYYY-MM-DD_HH-mm-ss.md`).
+- **Guardar cambios** sobrescribe el target actual; si cambias el nombre, el siguiente guardado escribe el nuevo archivo sin borrar automáticamente el anterior.
 - La carpeta se selecciona con File System Access API y el handle se conserva en IndexedDB.
 - En pantallas de 900 px o menos vuelve a modo overlay.
 
