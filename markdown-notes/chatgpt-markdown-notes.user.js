@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.1.0
-// @description  Panel lateral persistente para tomar notas Markdown por conversación y guardar cambios en una carpeta local.
+// @version      1.2.0
+// @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
 // @run-at       document-idle
@@ -21,6 +21,10 @@
   const DIRECTORY_KEY = 'notes-directory';
 
   const PANEL_OPEN_KEY = `${APP}:panel-open`;
+  const PANEL_WIDTH_KEY = `${APP}:panel-width`;
+  const DEFAULT_PANEL_WIDTH = 430;
+  const MIN_PANEL_WIDTH = 300;
+  const MAX_PANEL_WIDTH = 760;
   const NEW_CHAT_SESSION_KEY = `${APP}:new-chat-session-key`;
 
   let directoryHandle = null;
@@ -34,6 +38,7 @@
   let draftSaveTimer = null;
   let navigationTimer = null;
   let titleTimer = null;
+  let resizing = false;
 
   // ===========================================================================
   // IndexedDB
@@ -478,11 +483,28 @@
     style.id = `${APP}-styles`;
 
     style.textContent = `
+      :root {
+        --tmn-notes-width: ${DEFAULT_PANEL_WIDTH}px;
+        --tmn-notes-gap: 8px;
+      }
+
       #${APP}-launcher {
         position: fixed;
         right: 14px;
         bottom: 62px;
         z-index: 2147483000;
+      }
+
+      /*
+       * En escritorio el panel reserva espacio dentro del workspace de ChatGPT.
+       * Así reduce el área útil del chat en vez de taparlo.
+       */
+      @media (min-width: 901px) {
+        html.${APP}-open [data-app-shell-workspace-row="true"] {
+          box-sizing: border-box !important;
+          padding-right: calc(var(--tmn-notes-width) + var(--tmn-notes-gap)) !important;
+          transition: padding-right 120ms ease-out;
+        }
       }
 
       #${APP}-launcher button,
@@ -506,7 +528,7 @@
         top: 8px;
         right: 8px;
         bottom: 8px;
-        width: min(430px, calc(100vw - 24px));
+        width: min(var(--tmn-notes-width), calc(100vw - 24px));
         z-index: 2147483001;
         display: flex;
         flex-direction: column;
@@ -521,6 +543,40 @@
 
       #${APP}-panel[hidden] {
         display: none !important;
+      }
+
+      #${APP}-panel .tmn-resizer {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: -6px;
+        width: 12px;
+        z-index: 3;
+        cursor: ew-resize;
+        touch-action: none;
+      }
+
+      #${APP}-panel .tmn-resizer::after {
+        content: "";
+        position: absolute;
+        top: 12px;
+        bottom: 12px;
+        left: 5px;
+        width: 2px;
+        border-radius: 999px;
+        background: rgba(160,160,160,.22);
+        transition: background 120ms ease;
+      }
+
+      #${APP}-panel .tmn-resizer:hover::after,
+      html.${APP}-resizing #${APP}-panel .tmn-resizer::after {
+        background: rgba(210,210,210,.62);
+      }
+
+      html.${APP}-resizing,
+      html.${APP}-resizing * {
+        cursor: ew-resize !important;
+        user-select: none !important;
       }
 
       #${APP}-panel .tmn-header {
@@ -651,12 +707,16 @@
         cursor: default;
       }
 
-      @media (max-width: 700px) {
+      @media (max-width: 900px) {
         #${APP}-panel {
           top: 4px;
           right: 4px;
           bottom: 4px;
-          width: calc(100vw - 8px);
+          width: min(var(--tmn-notes-width), calc(100vw - 8px));
+        }
+
+        #${APP}-panel .tmn-resizer {
+          display: none;
         }
       }
     `;
@@ -692,6 +752,8 @@
     panel.hidden = true;
 
     panel.innerHTML = `
+      <div class="tmn-resizer" title="Arrastra para cambiar el ancho"></div>
+
       <div class="tmn-header">
         <div class="tmn-heading">
           <div class="tmn-chat-title">Nota de ChatGPT</div>
@@ -724,6 +786,11 @@
     `;
 
     document.body.appendChild(panel);
+
+    panel.querySelector('.tmn-resizer').addEventListener(
+      'pointerdown',
+      startResize
+    );
 
     panel.querySelector('.tmn-close').addEventListener('click', () => {
       setPanelOpen(false);
@@ -767,8 +834,102 @@
     });
   }
 
+
+  function maxPanelWidthForViewport() {
+    // Conserva al menos ~420 px para el chat en escritorio.
+    return Math.max(
+      MIN_PANEL_WIDTH,
+      Math.min(MAX_PANEL_WIDTH, window.innerWidth - 420)
+    );
+  }
+
+  function clampPanelWidth(width) {
+    const value = Number(width) || DEFAULT_PANEL_WIDTH;
+
+    return Math.round(
+      Math.max(
+        MIN_PANEL_WIDTH,
+        Math.min(value, maxPanelWidthForViewport())
+      )
+    );
+  }
+
+  function setPanelWidth(width, persist = true) {
+    const value = clampPanelWidth(width);
+
+    document.documentElement.style.setProperty(
+      '--tmn-notes-width',
+      `${value}px`
+    );
+
+    if (persist) {
+      localStorage.setItem(PANEL_WIDTH_KEY, String(value));
+    }
+
+    return value;
+  }
+
+  function restorePanelWidth() {
+    const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY));
+
+    setPanelWidth(
+      Number.isFinite(saved) && saved > 0
+        ? saved
+        : DEFAULT_PANEL_WIDTH,
+      false
+    );
+  }
+
+  function startResize(event) {
+    if (window.innerWidth <= 900) return;
+
+    event.preventDefault();
+
+    resizing = true;
+    document.documentElement.classList.add(`${APP}-resizing`);
+
+    const startX = event.clientX;
+    const startingWidth = parseFloat(
+      getComputedStyle(document.documentElement)
+        .getPropertyValue('--tmn-notes-width')
+    ) || DEFAULT_PANEL_WIDTH;
+
+    const onMove = moveEvent => {
+      if (!resizing) return;
+
+      // Panel anclado a la derecha:
+      // mover el borde a la izquierda => panel más ancho.
+      const delta = startX - moveEvent.clientX;
+      setPanelWidth(startingWidth + delta, false);
+    };
+
+    const onUp = () => {
+      if (!resizing) return;
+
+      resizing = false;
+      document.documentElement.classList.remove(`${APP}-resizing`);
+
+      const finalWidth = parseFloat(
+        getComputedStyle(document.documentElement)
+          .getPropertyValue('--tmn-notes-width')
+      ) || DEFAULT_PANEL_WIDTH;
+
+      setPanelWidth(finalWidth, true);
+
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp, true);
+      window.removeEventListener('pointercancel', onUp, true);
+    };
+
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp, true);
+    window.addEventListener('pointercancel', onUp, true);
+  }
+
   function setPanelOpen(open) {
     localStorage.setItem(PANEL_OPEN_KEY, open ? '1' : '0');
+
+    document.documentElement.classList.toggle(`${APP}-open`, open);
 
     if (panel) panel.hidden = !open;
     if (launcher) launcher.hidden = open;
@@ -997,8 +1158,7 @@
     // Antes del primer guardado seguimos el título actual de ChatGPT para que
     // el nombre del archivo se actualice cuando ChatGPT genere/renombre el chat.
     if (activeState && !activeState.noteTitle) {
-      renderHeader();
-    }
+      renderHeader();    }
   }
 
   // ===========================================================================
@@ -1029,6 +1189,7 @@
     addStyles();
     createLauncher();
     createPanel();
+    restorePanelWidth();
 
     await loadSavedDirectoryHandle();
 
@@ -1060,7 +1221,16 @@
       idbSet(DRAFT_STORE, activeChatKey, activeState).catch(() => {});
     });
 
-    console.info('[ChatGPT Markdown Notes] v1.1.0 cargado');
+    window.addEventListener('resize', () => {
+      const currentWidth = parseFloat(
+        getComputedStyle(document.documentElement)
+          .getPropertyValue('--tmn-notes-width')
+      ) || DEFAULT_PANEL_WIDTH;
+
+      setPanelWidth(currentWidth, false);
+    });
+
+    console.info('[ChatGPT Markdown Notes] v1.2.0 cargado');
   }
 
   bootstrap().catch(error => {

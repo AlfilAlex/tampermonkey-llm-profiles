@@ -1,0 +1,49 @@
+schema: spec-driven
+
+context: |
+  This OpenSpec project governs only the Prompt Profiles Tampermonkey userscript.
+
+  Product:
+  - Source file: ../chatgpt-prompt-profiles.user.js
+  - Runtime: browser / Tampermonkey on ChatGPT
+  - Language: vanilla JavaScript
+
+  Responsibilities:
+  - Inject BASE instructions plus exactly one active profile into outgoing user messages.
+  - Maintain enabled/profile state per ChatGPT conversation.
+  - Allow profiles to be created, edited, duplicated, renamed, and deleted.
+  - Hide injected instructions in the local rendered UI after submission.
+  - Preserve normal ChatGPT submission behavior, including attachments and multiline editing.
+
+  Constraints:
+  - Do not introduce runtime dependencies on sibling projects in this repository.
+  - Do not hardcode personal data, account identifiers, tokens, filesystem paths, or machine-specific values.
+  - Preserve Tampermonkey metadata headers.
+  - Treat ChatGPT DOM selectors and markup as unstable external dependencies.
+  - DOM integrations must fail safely when expected elements are unavailable.
+  - Preserve existing GM storage and per-conversation state unless a change explicitly defines a migration.
+  - Visual-only UI such as profile badges must not become part of the persisted ChatGPT message.
+  - Prefer browser-native APIs and vanilla JavaScript.
+  - Do not add telemetry, analytics, external storage, or network calls unless explicitly specified.
+
+rules:
+  proposal:
+    - State compatibility impact on existing Tampermonkey installations.
+    - Identify any GM storage or per-conversation state changes.
+    - Distinguish behavior changes from internal refactors.
+
+  specs:
+    - Describe externally observable behavior.
+    - Every requirement must include at least one scenario.
+    - Include fallback behavior when ChatGPT DOM elements are unavailable.
+    - Include send behavior for Enter, send-button clicks, editing/resending, and attachments when relevant.
+
+  design:
+    - Document DOM interception, event capture, observer behavior, and React/editor synchronization when relevant.
+    - Document storage migrations when GM storage formats change.
+    - Explain graceful degradation for ChatGPT DOM changes.
+
+  tasks:
+    - Include node --check for modified JavaScript.
+    - Include manual browser validation for send interception and rendered-message cleanup.
+    - Include reload and per-conversation persistence testing when storage behavior changes.
