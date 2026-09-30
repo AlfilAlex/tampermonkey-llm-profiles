@@ -1,0 +1,51 @@
+schema: spec-driven
+
+context: |
+  This OpenSpec project governs only the Markdown Notes Tampermonkey userscript.
+
+  Product:
+  - Source file: ../chatgpt-markdown-notes.user.js
+  - Runtime: browser / Tampermonkey on ChatGPT
+  - Language: vanilla JavaScript
+
+  Responsibilities:
+  - Provide Markdown notes associated with ChatGPT conversations.
+  - Keep one persistent draft per conversation.
+  - Allow the notes panel to remain usable while reading the chat.
+  - Save Markdown files to a user-selected local folder.
+  - Reuse the same file after the first save so later saves behave as "Guardar cambios".
+
+  Constraints:
+  - Do not introduce runtime dependencies on sibling projects in this repository.
+  - Do not hardcode personal data, usernames, filesystem paths, account identifiers, or tokens.
+  - Preserve Tampermonkey metadata headers.
+  - Treat ChatGPT DOM selectors and markup as unstable external dependencies.
+  - Persist drafts locally with browser storage.
+  - File access must remain explicit and browser-controlled through the File System Access API.
+  - A stored directory handle may require permission to be requested again in a later browser session.
+  - Preserve existing IndexedDB/localStorage state unless a change explicitly defines a migration.
+  - Prefer browser-native APIs and vanilla JavaScript.
+  - Do not add telemetry, analytics, remote storage, or external network calls unless explicitly specified.
+
+rules:
+  proposal:
+    - State compatibility impact on existing Tampermonkey installations and saved drafts.
+    - Identify changes to IndexedDB, localStorage, file identity, or filesystem permissions.
+    - Distinguish browser-only persistence from filesystem persistence.
+
+  specs:
+    - Describe externally observable behavior.
+    - Every requirement must include at least one scenario.
+    - Include reload, conversation switching, and permission fallback behavior when relevant.
+    - Treat the saved Markdown file and the local draft as distinct persistence layers.
+
+  design:
+    - Document IndexedDB/localStorage schemas and migrations when changed.
+    - Document File System Access API permission behavior and browser limitations.
+    - Document ChatGPT title/chat-ID detection assumptions and graceful degradation.
+    - Document responsive behavior when changing panel layout.
+
+  tasks:
+    - Include node --check for modified JavaScript.
+    - Include manual browser validation for panel layout and ChatGPT DOM integration.
+    - Include reload, conversation-switch, draft persistence, and filesystem overwrite tests when relevant.
