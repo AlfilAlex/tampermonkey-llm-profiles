@@ -109,7 +109,7 @@ When Cornell mode is saved, Markdown Notes MUST serialize the structured draft t
 - WHEN the user saves the note
 - THEN the output SHALL contain frontmatter identifying `note_method: "cornell"`
 - AND SHALL contain a Cornell Notes section
-- AND SHALL contain each block in persisted order
+- AND SHALL contain each non-empty block in persisted order
 - AND SHALL contain a Summary section.
 
 #### Scenario: Technical Markdown inside notes
@@ -123,6 +123,12 @@ When Cornell mode is saved, Markdown Notes MUST serialize the structured draft t
 - GIVEN a Cornell block contains notes but has an empty cue
 - WHEN the file is serialized
 - THEN the notes content SHALL still be exported under a neutral block heading.
+
+#### Scenario: Completely empty block
+
+- GIVEN a Cornell block has neither cue nor notes content
+- WHEN the file is serialized
+- THEN that block SHALL NOT create an empty Markdown section.
 
 ### Requirement: Freeform compatibility
 
