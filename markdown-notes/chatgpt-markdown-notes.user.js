@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.2.1
+// @version      1.3.0
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -259,7 +259,9 @@
       body: '',
       savedBody: '',
       noteTitle: null,
+      manualFilename: null,
       filename: null,
+      filenameFallbackAt: new Date().toISOString(),
       createdAt: null,
       lastSavedAt: null,
       updatedAt: new Date().toISOString()
@@ -286,9 +288,15 @@
       body: typeof value.body === 'string' ? value.body : '',
       savedBody: typeof value.savedBody === 'string' ? value.savedBody : '',
       noteTitle,
+      manualFilename: typeof value.manualFilename === 'string' && value.manualFilename.trim()
+        ? value.manualFilename.trim()
+        : null,
       filename: typeof value.filename === 'string' && value.filename.trim()
         ? value.filename
         : null,
+      filenameFallbackAt: typeof value.filenameFallbackAt === 'string' && value.filenameFallbackAt
+        ? value.filenameFallbackAt
+        : base.filenameFallbackAt,
       createdAt: typeof value.createdAt === 'string' ? value.createdAt : null,
       lastSavedAt: typeof value.lastSavedAt === 'string' ? value.lastSavedAt : null,
       updatedAt: typeof value.updatedAt === 'string'
@@ -323,34 +331,88 @@
   }
 
   function isDirty() {
-    return Boolean(activeState && activeState.body !== activeState.savedBody);
+    if (!activeState) return false;
+
+    const bodyChanged = activeState.body !== activeState.savedBody;
+    const filenameChanged = Boolean(activeState.filename) &&
+      currentFilename() !== activeState.filename;
+
+    return bodyChanged || filenameChanged;
+  }
+
+  function adoptDetectedTitle() {
+    if (!activeState || activeState.noteTitle) return false;
+
+    const detectedTitle = getDetectedChatTitle();
+    if (!detectedTitle) return false;
+
+    activeState.noteTitle = detectedTitle;
+
+    // Persistimos el título en cuanto aparece. ChatGPT puede desmontar o
+    // re-renderizar temporalmente el sidebar; después de adoptarlo no queremos
+    // volver al fallback por una lectura transitoria del DOM.
+    scheduleDraftPersistence();
+    return true;
   }
 
   function currentNoteTitle() {
     return activeState?.noteTitle || getDetectedChatTitle() || FALLBACK_NOTE_TITLE;
   }
 
-  function provisionalFilename() {
-    const chatId = getChatId();
-    const rawIdentity = chatId || activeChatKey?.replace(/^new:/, '') || 'nuevo';
-    const identity = String(rawIdentity)
-      .toLowerCase()
-      .replace(/[^a-z0-9-]/g, '')
-      .slice(0, 12) || 'nuevo';
+  function normalizeFilename(value) {
+    let filename = String(value || '')
+      .trim()
+      .replace(/[\u0000-\u001f\u007f]/g, '')
+      .replace(/[\\/:*?"<>|]/g, '-')
+      .replace(/\s+/g, ' ')
+      .replace(/[. ]+$/g, '');
 
-    return `nota-chatgpt-${identity}.md`;
+    if (!filename) return '';
+
+    if (!/\.md$/i.test(filename)) {
+      filename += '.md';
+    }
+
+    const extension = '.md';
+    let stem = filename.slice(0, -extension.length)
+      .slice(0, 180)
+      .replace(/[. ]+$/g, '');
+
+    if (!stem) stem = 'nota';
+
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(stem)) {
+      stem = `nota-${stem}`;
+    }
+
+    return `${stem}${extension}`;
+  }
+
+  function timestampFilename(value = activeState?.filenameFallbackAt) {
+    let date = value ? new Date(value) : new Date();
+
+    if (Number.isNaN(date.getTime())) {
+      date = new Date();
+    }
+
+    return (
+      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}_` +
+      `${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}.md`
+    );
+  }
+
+  function automaticFilename() {
+    const title = activeState?.noteTitle || getDetectedChatTitle();
+    if (title) return `${slugify(title)}.md`;
+
+    const chatId = getChatId();
+    if (chatId) return normalizeFilename(chatId);
+
+    return timestampFilename();
   }
 
   function currentFilename() {
-    if (activeState?.noteTitle) {
-      return activeState.filename || `${slugify(activeState.noteTitle)}.md`;
-    }
-
-    const detectedTitle = getDetectedChatTitle();
-    if (detectedTitle) return `${slugify(detectedTitle)}.md`;
-
-    if (activeState?.filename) return activeState.filename;
-    return provisionalFilename();
+    const manual = normalizeFilename(activeState?.manualFilename);
+    return manual || automaticFilename();
   }
 
   // ===========================================================================
@@ -649,12 +711,21 @@
       }
 
       #${APP}-panel .tmn-file-name {
-        margin-top: 4px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        opacity: .58;
+        box-sizing: border-box;
+        width: 100%;
+        margin-top: 6px;
+        border: 1px solid rgba(127,127,127,.24);
+        border-radius: 7px;
+        padding: 5px 7px;
+        outline: none;
+        background: rgba(0,0,0,.16);
+        color: #d7d7d7;
         font: 11px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+
+      #${APP}-panel .tmn-file-name:focus {
+        border-color: rgba(180,180,180,.55);
+        background: rgba(0,0,0,.24);
       }
 
       #${APP}-panel .tmn-header-actions {
@@ -805,7 +876,13 @@
       <div class="tmn-header">
         <div class="tmn-heading">
           <div class="tmn-chat-title">${FALLBACK_NOTE_TITLE}</div>
-          <div class="tmn-file-name">nota-chatgpt.md</div>
+          <input
+            class="tmn-file-name"
+            type="text"
+            aria-label="Nombre del archivo Markdown"
+            title="Editable. Vacíalo para volver al nombre automático."
+            spellcheck="false"
+          >
         </div>
 
         <div class="tmn-header-actions">
@@ -871,6 +948,31 @@
     });
 
     panel.querySelector('.tmn-save').addEventListener('click', saveFile);
+
+    const filenameInput = panel.querySelector('.tmn-file-name');
+
+    filenameInput.addEventListener('input', event => {
+      if (!activeState) return;
+
+      const value = String(event.target.value || '').trim();
+      activeState.manualFilename = value || null;
+
+      renderSaveButton();
+      updateStatus();
+      scheduleDraftPersistence();
+    });
+
+    filenameInput.addEventListener('blur', () => {
+      if (!activeState) return;
+
+      const normalized = normalizeFilename(activeState.manualFilename);
+      activeState.manualFilename = normalized || null;
+
+      renderHeader();
+      renderSaveButton();
+      updateStatus();
+      scheduleDraftPersistence();
+    });
 
     panel.querySelector('.tmn-editor').addEventListener('input', event => {
       if (!activeState) return;
@@ -1011,11 +1113,19 @@
   function renderHeader() {
     if (!panel) return;
 
+    adoptDetectedTitle();
+
     const title = currentNoteTitle();
     const filename = currentFilename();
+    const filenameInput = panel.querySelector('.tmn-file-name');
 
     panel.querySelector('.tmn-chat-title').textContent = title;
-    panel.querySelector('.tmn-file-name').textContent = filename;
+
+    // No reemplazar texto mientras el usuario está escribiendo. El valor se
+    // normaliza al perder el foco o justo antes de guardar.
+    if (filenameInput && document.activeElement !== filenameInput) {
+      filenameInput.value = filename;
+    }
   }
 
   function renderEditor() {
@@ -1109,37 +1219,32 @@
         );
       }
 
-      // Sólo fijamos la identidad definitiva cuando existe un título real.
-      // Si ChatGPT todavía no lo expone, guardamos con un nombre provisional
-      // único por chat sin congelar el fallback visual como noteTitle.
-      if (!activeState.noteTitle) {
-        const detectedTitle = getDetectedChatTitle();
+      // Si el título ya apareció, lo adoptamos para metadatos y para el nombre
+      // automático. Un nombre manual siempre tiene prioridad.
+      adoptDetectedTitle();
 
-        if (detectedTitle) {
-          activeState.noteTitle = detectedTitle;
-          activeState.filename = `${slugify(detectedTitle)}.md`;
-        }
+      if (activeState.manualFilename) {
+        activeState.manualFilename = normalizeFilename(activeState.manualFilename) || null;
       }
 
-      if (!activeState.filename) {
-        activeState.filename = activeState.noteTitle
-          ? `${slugify(activeState.noteTitle)}.md`
-          : provisionalFilename();
-      }
+      const targetFilename = currentFilename();
 
       if (!activeState.createdAt) {
         activeState.createdAt = localIsoTimestamp();
       }
 
       renderHeader();
-      setStatus(`Guardando cambios en ${activeState.filename}…`);
+      setStatus(`Guardando cambios en ${targetFilename}…`);
 
       await writeMarkdownFile(
         directoryHandle,
-        activeState.filename,
+        targetFilename,
         buildMarkdown()
       );
 
+      // Sólo después de una escritura exitosa registramos el nombre del archivo
+      // que realmente existe en disco.
+      activeState.filename = targetFilename;
       activeState.savedBody = activeState.body;
       activeState.lastSavedAt = localIsoTimestamp();
 
@@ -1228,8 +1333,9 @@
     if (!isSave || !panel || panel.hidden) return;
 
     const editor = panel.querySelector('.tmn-editor');
+    const filenameInput = panel.querySelector('.tmn-file-name');
 
-    if (event.target !== editor) return;
+    if (event.target !== editor && event.target !== filenameInput) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -1286,7 +1392,7 @@
       setPanelWidth(currentWidth, false);
     });
 
-    console.info('[ChatGPT Markdown Notes] v1.2.1 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.3.0 cargado');
   }
 
   bootstrap().catch(error => {
