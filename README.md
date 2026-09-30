@@ -31,12 +31,15 @@ No existe un OpenSpec compartido en la raíz: compartir repositorio no implica c
 - Permite crear perfiles adicionales desde la interfaz.
 - Mantiene ON/OFF y perfil seleccionado por conversación.
 
-### ChatGPT Markdown Notes v1.3.0
+### ChatGPT Markdown Notes v1.4.0
 
 - Panel lateral de notas Markdown persistente por conversación.
 - El panel está acoplado al layout en escritorio: reserva espacio y no tapa los mensajes.
 - Anchura ajustable arrastrando el borde izquierdo; se conserva al recargar.
 - Borrador persistente en IndexedDB.
+- Modos por conversación: **Libre**, **Cornell** y **Repaso**.
+- Cornell usa bloques `cue + notas`, resumen, layout responsive y exportación Markdown portable.
+- Repaso muestra un cue por vez y mantiene las notas ocultas hasta revelarlas.
 - El nombre del archivo es editable y se conserva por conversación.
 - Sin nombre manual, usa esta prioridad: título del chat → ID del chat → fecha/hora local (`YYYY-MM-DD_HH-mm-ss.md`).
 - **Guardar cambios** sobrescribe el target actual; si cambias el nombre, el siguiente guardado escribe el nuevo archivo sin borrar automáticamente el anterior.
