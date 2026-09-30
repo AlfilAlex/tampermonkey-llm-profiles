@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.2.0
+// @version      1.2.1
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -26,6 +26,7 @@
   const MIN_PANEL_WIDTH = 300;
   const MAX_PANEL_WIDTH = 760;
   const NEW_CHAT_SESSION_KEY = `${APP}:new-chat-session-key`;
+  const FALLBACK_NOTE_TITLE = 'Nota de ChatGPT';
 
   let directoryHandle = null;
   let panel = null;
@@ -172,6 +173,10 @@
     );
   }
 
+  function isFallbackNoteTitle(value) {
+    return normalizeTitle(value).toLowerCase() === FALLBACK_NOTE_TITLE.toLowerCase();
+  }
+
   function titleFromSidebarLink() {
     const currentPath = location.pathname;
 
@@ -180,8 +185,22 @@
         const url = new URL(anchor.href, location.href);
         if (url.pathname !== currentPath) continue;
 
-        const text = normalizeTitle(anchor.textContent);
-        if (!isGenericTitle(text)) return text;
+        // ChatGPT cambia con frecuencia la estructura del sidebar. Preferimos
+        // nodos que suelen contener únicamente el nombre de la conversación y
+        // dejamos textContent completo como último fallback.
+        const candidates = [
+          anchor.querySelector('[data-testid*="title"]')?.textContent,
+          anchor.querySelector('[dir="auto"]')?.textContent,
+          anchor.querySelector('.truncate')?.textContent,
+          anchor.getAttribute('title'),
+          anchor.getAttribute('aria-label'),
+          anchor.textContent
+        ];
+
+        for (const candidate of candidates) {
+          const text = normalizeTitle(candidate);
+          if (!isGenericTitle(text)) return text;
+        }
       } catch {
         // Ignorar href inválido.
       }
@@ -218,7 +237,9 @@
       if (!isGenericTitle(candidate)) return candidate;
     }
 
-    return 'Nota de ChatGPT';
+    // Importante: una ausencia de título no debe convertirse en un título real.
+    // El fallback visual se aplica en currentNoteTitle(), pero no se persiste.
+    return '';
   }
 
   function getChatUrl() {
@@ -250,12 +271,21 @@
 
     if (!value || typeof value !== 'object') return base;
 
+    const storedTitle = typeof value.noteTitle === 'string' && value.noteTitle.trim()
+      ? value.noteTitle.trim()
+      : null;
+
+    // v1.2.0 podía persistir el fallback "Nota de ChatGPT" como si fuera el
+    // título real. Lo tratamos como no resuelto para que pueda autocorregirse
+    // cuando ChatGPT exponga el título verdadero.
+    const noteTitle = storedTitle && !isFallbackNoteTitle(storedTitle)
+      ? storedTitle
+      : null;
+
     return {
       body: typeof value.body === 'string' ? value.body : '',
       savedBody: typeof value.savedBody === 'string' ? value.savedBody : '',
-      noteTitle: typeof value.noteTitle === 'string' && value.noteTitle.trim()
-        ? value.noteTitle
-        : null,
+      noteTitle,
       filename: typeof value.filename === 'string' && value.filename.trim()
         ? value.filename
         : null,
@@ -297,12 +327,30 @@
   }
 
   function currentNoteTitle() {
-    return activeState?.noteTitle || getDetectedChatTitle();
+    return activeState?.noteTitle || getDetectedChatTitle() || FALLBACK_NOTE_TITLE;
+  }
+
+  function provisionalFilename() {
+    const chatId = getChatId();
+    const rawIdentity = chatId || activeChatKey?.replace(/^new:/, '') || 'nuevo';
+    const identity = String(rawIdentity)
+      .toLowerCase()
+      .replace(/[^a-z0-9-]/g, '')
+      .slice(0, 12) || 'nuevo';
+
+    return `nota-chatgpt-${identity}.md`;
   }
 
   function currentFilename() {
+    if (activeState?.noteTitle) {
+      return activeState.filename || `${slugify(activeState.noteTitle)}.md`;
+    }
+
+    const detectedTitle = getDetectedChatTitle();
+    if (detectedTitle) return `${slugify(detectedTitle)}.md`;
+
     if (activeState?.filename) return activeState.filename;
-    return `${slugify(currentNoteTitle())}.md`;
+    return provisionalFilename();
   }
 
   // ===========================================================================
@@ -756,7 +804,7 @@
 
       <div class="tmn-header">
         <div class="tmn-heading">
-          <div class="tmn-chat-title">Nota de ChatGPT</div>
+          <div class="tmn-chat-title">${FALLBACK_NOTE_TITLE}</div>
           <div class="tmn-file-name">nota-chatgpt.md</div>
         </div>
 
@@ -1061,14 +1109,22 @@
         );
       }
 
-      // La identidad del archivo se fija en el primer guardado. A partir de
-      // ahí se reutiliza exactamente el mismo nombre y se sobrescribe.
+      // Sólo fijamos la identidad definitiva cuando existe un título real.
+      // Si ChatGPT todavía no lo expone, guardamos con un nombre provisional
+      // único por chat sin congelar el fallback visual como noteTitle.
       if (!activeState.noteTitle) {
-        activeState.noteTitle = getDetectedChatTitle();
+        const detectedTitle = getDetectedChatTitle();
+
+        if (detectedTitle) {
+          activeState.noteTitle = detectedTitle;
+          activeState.filename = `${slugify(detectedTitle)}.md`;
+        }
       }
 
       if (!activeState.filename) {
-        activeState.filename = `${slugify(activeState.noteTitle)}.md`;
+        activeState.filename = activeState.noteTitle
+          ? `${slugify(activeState.noteTitle)}.md`
+          : provisionalFilename();
       }
 
       if (!activeState.createdAt) {
@@ -1230,7 +1286,7 @@
       setPanelWidth(currentWidth, false);
     });
 
-    console.info('[ChatGPT Markdown Notes] v1.2.0 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.2.1 cargado');
   }
 
   bootstrap().catch(error => {
