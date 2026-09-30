@@ -269,11 +269,13 @@ The filesystem file is not used as the editable database.
 - Focus should remain predictable after adding, moving, or deleting a block.
 - Destructive block deletion should avoid accidental activation; the implementation may use confirmation or an undo strategy.
 
-## Open Questions for Implementation Review
+## Implementation Decisions
 
-1. Whether block deletion should use confirmation or short-lived undo.
-2. Whether review mode should show one block at a time or a scrollable list of all cues.
-3. Whether the 560 px layout breakpoint should be CSS container-query based or calculated from panel width.
-4. Whether empty Cornell drafts should start with zero blocks or one blank block.
+The implementation resolves the review questions as follows:
 
-These are intentionally left reviewable before implementation.
+1. **Block deletion uses confirmation.** The first version uses an explicit confirmation before destructive deletion. Undo history is deferred because it introduces additional transient state and timing semantics.
+2. **Review shows one block at a time.** This reduces visual distraction and keeps the cue-driven recall interaction focused. Previous/next controls navigate the ordered blocks.
+3. **The 560 px breakpoint uses a CSS container query.** The panel is resizable, so the Cornell editor's own available width is a better signal than viewport width.
+4. **The first entry into Cornell starts with one blank block.** This removes an unnecessary first click for the common case. Deleting all blocks is still allowed; the Add Block action remains available.
+
+These decisions are part of the first implementation and can be revisited through a later OpenSpec change.
