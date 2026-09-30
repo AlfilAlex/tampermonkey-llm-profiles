@@ -326,6 +326,21 @@
     return Boolean(activeState && activeState.body !== activeState.savedBody);
   }
 
+  function adoptDetectedTitle() {
+    if (!activeState || activeState.noteTitle) return false;
+
+    const detectedTitle = getDetectedChatTitle();
+    if (!detectedTitle) return false;
+
+    activeState.noteTitle = detectedTitle;
+
+    // Persistimos el título en cuanto aparece. ChatGPT puede desmontar o
+    // re-renderizar temporalmente el sidebar; después de adoptarlo no queremos
+    // volver al fallback por una lectura transitoria del DOM.
+    scheduleDraftPersistence();
+    return true;
+  }
+
   function currentNoteTitle() {
     return activeState?.noteTitle || getDetectedChatTitle() || FALLBACK_NOTE_TITLE;
   }
@@ -341,9 +356,25 @@
     return `nota-chatgpt-${identity}.md`;
   }
 
+  function isProvisionalFilename(value) {
+    const filename = String(value || '').trim().toLowerCase();
+
+    return (
+      filename === 'nota-de-chatgpt.md' ||
+      /^nota-chatgpt-[a-z0-9-]+\.md$/.test(filename)
+    );
+  }
+
   function currentFilename() {
     if (activeState?.noteTitle) {
-      return activeState.filename || `${slugify(activeState.noteTitle)}.md`;
+      // Un filename provisional pertenecía al período en que aún no había
+      // título. En cuanto conocemos el título real, la identidad objetivo pasa
+      // a ser la derivada de ese título.
+      if (activeState.filename && !isProvisionalFilename(activeState.filename)) {
+        return activeState.filename;
+      }
+
+      return `${slugify(activeState.noteTitle)}.md`;
     }
 
     const detectedTitle = getDetectedChatTitle();
@@ -1011,6 +1042,8 @@
   function renderHeader() {
     if (!panel) return;
 
+    adoptDetectedTitle();
+
     const title = currentNoteTitle();
     const filename = currentFilename();
 
@@ -1109,37 +1142,27 @@
         );
       }
 
-      // Sólo fijamos la identidad definitiva cuando existe un título real.
-      // Si ChatGPT todavía no lo expone, guardamos con un nombre provisional
-      // único por chat sin congelar el fallback visual como noteTitle.
-      if (!activeState.noteTitle) {
-        const detectedTitle = getDetectedChatTitle();
-
-        if (detectedTitle) {
-          activeState.noteTitle = detectedTitle;
-          activeState.filename = `${slugify(detectedTitle)}.md`;
-        }
-      }
-
-      if (!activeState.filename) {
-        activeState.filename = activeState.noteTitle
-          ? `${slugify(activeState.noteTitle)}.md`
-          : provisionalFilename();
-      }
+      // Si el título ya apareció, lo adoptamos antes de decidir el archivo.
+      // Si aún no existe, currentFilename() produce un nombre provisional.
+      adoptDetectedTitle();
+      const targetFilename = currentFilename();
 
       if (!activeState.createdAt) {
         activeState.createdAt = localIsoTimestamp();
       }
 
       renderHeader();
-      setStatus(`Guardando cambios en ${activeState.filename}…`);
+      setStatus(`Guardando cambios en ${targetFilename}…`);
 
       await writeMarkdownFile(
         directoryHandle,
-        activeState.filename,
+        targetFilename,
         buildMarkdown()
       );
 
+      // Sólo después de una escritura exitosa registramos el nombre del archivo
+      // que realmente existe en disco.
+      activeState.filename = targetFilename;
       activeState.savedBody = activeState.body;
       activeState.lastSavedAt = localIsoTimestamp();
 
