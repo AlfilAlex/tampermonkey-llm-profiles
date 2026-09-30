@@ -48,6 +48,7 @@ Markdown Notes MUST avoid a shared generic filename for unrelated conversations 
 #### Scenario: Real title appears after a provisional filename exists
 
 - GIVEN a provisional filename is stored for the note
+- AND no manual filename override exists
 - AND a real title is later detected and adopted
 - WHEN the panel renders
 - THEN the target filename SHALL be derived from the adopted title instead of the provisional name.
@@ -55,5 +56,6 @@ Markdown Notes MUST avoid a shared generic filename for unrelated conversations 
 #### Scenario: Save succeeds after title adoption
 
 - GIVEN a real title has been adopted
+- AND no manual filename override exists
 - WHEN the note is saved successfully
 - THEN the stored filename SHALL be updated to the title-derived filename that was actually written.
