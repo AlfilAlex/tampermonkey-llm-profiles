@@ -1345,7 +1345,7 @@
           <button class="tmn-add-block" type="button">+ Añadir bloque</button>
 
           <div class="tmn-summary-wrap">
-            <label for="${APP}-summary">Summary</label>
+            <label for="${APP}-summary">Resumen</label>
             <textarea
               id="${APP}-summary"
               class="tmn-summary-editor"
@@ -1684,7 +1684,6 @@
     for (const button of panel.querySelectorAll('.tmn-mode-switch button[data-mode]')) {
       const active = button.dataset.mode === activeState.noteMode;
       button.setAttribute('aria-selected', String(active));
-      button.tabIndex = active ? 0 : -1;
     }
   }
 
@@ -1747,7 +1746,7 @@
       const cueLabel = document.createElement('label');
       const cueId = `${APP}-cue-${block.id}`;
       cueLabel.htmlFor = cueId;
-      cueLabel.textContent = 'Cue / Question';
+      cueLabel.textContent = 'Cue / Pregunta';
 
       const cue = document.createElement('textarea');
       cue.id = cueId;
@@ -1766,7 +1765,7 @@
       const notesLabel = document.createElement('label');
       const notesId = `${APP}-notes-${block.id}`;
       notesLabel.htmlFor = notesId;
-      notesLabel.textContent = 'Notes';
+      notesLabel.textContent = 'Notas';
 
       const notes = document.createElement('textarea');
       notes.id = notesId;
