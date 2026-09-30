@@ -1,3 +1,33 @@
+# Tampermonkey LLM Profiles
+
+Userscripts para extender ChatGPT en el navegador sin modificar el servicio en el servidor.
+
+## Userscripts
+
+### ChatGPT Prompt Profiles v1.3.0
+
+- Inyecta una base común + un perfil activo en cada mensaje.
+- Perfiles principales: Troubleshooting preciso, Aprendizaje con práctica y verificación, Guía estricta de razonamiento y Evaluación autónoma.
+- Permite crear perfiles adicionales desde la interfaz.
+- Mantiene ON/OFF y perfil seleccionado por conversación.
+
+### ChatGPT Markdown Notes v1.2.0
+
+- Panel lateral de notas Markdown persistente por conversación.
+- El panel está acoplado al layout en escritorio: reserva espacio y no tapa los mensajes.
+- Anchura ajustable arrastrando el borde izquierdo; se conserva al recargar.
+- Borrador persistente en IndexedDB.
+- Usa el título del chat para el nombre inicial del archivo.
+- Después del primer guardado, **Guardar cambios** sobrescribe el mismo archivo.
+- La carpeta se selecciona con File System Access API y el handle se conserva en IndexedDB.
+- En pantallas de 900 px o menos vuelve a modo overlay.
+
+Archivos actuales:
+
+- `chatgpt-prompt-profiles-v1.3.0.user.js`
+- `chatgpt-markdown-notes-v1.2.0.user.js`
+
+---
 
 **Recomendación:** usa **Aprendizaje con práctica y verificación** como perfil habitual para estudiar. Combina estrategias con respaldo en ciencias del aprendizaje y decisiones informadas por ensayos de tutoría con LLM. La guía estricta sirve para practicar construyendo tu solución; la evaluación permite observar qué puedes hacer sin ayuda.
 
