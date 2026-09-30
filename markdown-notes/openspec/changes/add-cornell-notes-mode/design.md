@@ -120,6 +120,7 @@ Extend the existing per-conversation draft object without changing IndexedDB obj
   filename: null,
 
   noteMode: "freeform",
+  savedNoteMode: null,
 
   cornell: {
     blocks: [
@@ -160,13 +161,17 @@ Freeform mode continues comparing `body` against `savedBody`.
 
 Cornell mode needs an equivalent saved snapshot so that unsaved changes are detectable without serializing the filesystem Markdown and treating it as application state.
 
-A normalized Cornell snapshot should include:
+A normalized Cornell snapshot includes:
 
-- block order;
+- non-empty blocks in their persisted order;
 - block IDs;
 - cue text;
 - notes text;
 - summary.
+
+Fully empty starter blocks are ignored by the snapshot so entering Cornell mode does not create meaningless filesystem content.
+
+`savedNoteMode` records whether the last successful filesystem save was produced from freeform or Cornell data. This makes a mode change detectable as an unsaved output change even when the underlying text itself has not changed.
 
 Filename changes remain part of the existing dirty-state calculation.
 
@@ -221,7 +226,7 @@ If a block has notes but no cue, export a neutral heading such as:
 ### 1. Note
 ```
 
-The serializer MUST NOT drop the block content.
+The serializer MUST NOT drop the block content. Blocks with both cue and notes empty are omitted from filesystem Markdown.
 
 ## Mode Switching
 
