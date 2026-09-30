@@ -18,7 +18,7 @@ adopted title
 
 Once a title is adopted it is stored in `activeState.noteTitle` and persisted through the existing IndexedDB draft store. Later DOM failures no longer invalidate it.
 
-A provisional filename remains valid only while `noteTitle` is unresolved. Once a real title exists, `currentFilename()` ignores known provisional forms and derives the target filename from the adopted title.
+A provisional filename remains valid only while `noteTitle` is unresolved. Once a real title exists, automatic naming derives the target filename from the adopted title. The later `editable-markdown-note-filename` change adds an explicit manual override with higher priority than this automatic rule.
 
 The actual `activeState.filename` is updated only after a successful filesystem write, so persisted metadata reflects a file that was really written.
 
