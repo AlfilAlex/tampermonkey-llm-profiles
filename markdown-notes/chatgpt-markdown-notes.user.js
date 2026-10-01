@@ -2462,8 +2462,8 @@
         );
       }
 
-      // Si el título ya apareció, lo adoptamos para metadatos y para el nombre
-      // automático. Un nombre manual siempre tiene prioridad.
+      // Si el título ya apareció, lo adoptamos únicamente para los metadatos
+      // del documento. El filename siempre proviene del campo manual.
       adoptDetectedTitle();
 
       if (!activeState.createdAt) {
