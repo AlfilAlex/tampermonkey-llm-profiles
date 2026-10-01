@@ -1067,11 +1067,28 @@
       panel.querySelector('.tmn-summary-editor');
   }
 
+  function isMarkdownTargetForActiveMode(target) {
+    if (!isMarkdownTextarea(target) || !activeState) return false;
+
+    if (activeState.noteMode === 'freeform') {
+      return target.classList.contains('tmn-editor');
+    }
+
+    if (activeState.noteMode === 'cornell') {
+      return (
+        target.classList.contains('tmn-block-notes') ||
+        target.classList.contains('tmn-summary-editor')
+      );
+    }
+
+    return false;
+  }
+
   function resolveMarkdownTarget() {
     const remembered = markdownSelection?.target;
 
     if (
-      isMarkdownTextarea(remembered) &&
+      isMarkdownTargetForActiveMode(remembered) &&
       remembered.isConnected &&
       panel?.contains(remembered)
     ) {
