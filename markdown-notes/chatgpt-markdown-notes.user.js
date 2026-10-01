@@ -584,13 +584,15 @@
   }
 
   function shortFallbackId() {
-    if (typeof crypto?.randomUUID === 'function') {
-      return crypto.randomUUID().replaceAll('-', '').slice(0, 8).toLowerCase();
+    const browserCrypto = globalThis.crypto;
+
+    if (typeof browserCrypto?.randomUUID === 'function') {
+      return browserCrypto.randomUUID().replaceAll('-', '').slice(0, 8).toLowerCase();
     }
 
-    if (typeof crypto?.getRandomValues === 'function') {
+    if (typeof browserCrypto?.getRandomValues === 'function') {
       const bytes = new Uint8Array(4);
-      crypto.getRandomValues(bytes);
+      browserCrypto.getRandomValues(bytes);
 
       return Array.from(bytes, byte =>
         byte.toString(16).padStart(2, '0')
