@@ -457,7 +457,9 @@
   function syncBodyFromCornell() {
     if (!activeState?.cornell) return;
 
-    activeState.body = serializeCornellBody(activeState.cornell);
+    activeState.body = cornellHasContent(activeState.cornell)
+      ? serializeCornellBody(activeState.cornell)
+      : '';
   }
 
   function syncCornellFromBody({ canonicalize = true } = {}) {
@@ -509,17 +511,46 @@
       ? value.noteTitle.trim()
       : null;
 
-    // v1.2.0 podía persistir el fallback "Nota de ChatGPT" como si fuera el
-    // título real. Lo tratamos como no resuelto para que pueda autocorregirse
-    // cuando ChatGPT exponga el título verdadero.
     const noteTitle = storedTitle &&
       !isFallbackNoteTitle(storedTitle) &&
       !isGenericTitle(storedTitle)
       ? storedTitle
       : null;
 
+    const noteMode = ['freeform', 'cornell', 'review'].includes(value.noteMode)
+      ? value.noteMode
+      : 'freeform';
+
+    let body = typeof value.body === 'string' ? value.body : '';
+    let cornell = normalizeCornellState(value.cornell);
+    const parsedBody = parseCornellBody(body);
+
+    if (parsedBody) {
+      // El Markdown canónico gana sobre cualquier proyección Cornell cacheada.
+      cornell = normalizeCornellState(parsedBody);
+    } else if (cornellHasContent(cornell)) {
+      if (body.trim()) {
+        // Migración desde v1.4.x: Libre y Cornell podían contener documentos
+        // distintos. Preservamos ambos en un único documento Cornell.
+        cornell = normalizeCornellState({
+          blocks: [
+            createCornellBlock({ cue: '', notes: body }),
+            ...cornell.blocks
+          ],
+          summary: cornell.summary
+        });
+      }
+
+      body = serializeCornellBody(cornell);
+    } else if (noteMode !== 'freeform' && body.trim()) {
+      // Un draft que estaba visualmente en Cornell/Repaso pero sólo conserva
+      // body se importa sin pérdida como un único bloque.
+      cornell = normalizeCornellState(importBodyAsCornell(body));
+      body = serializeCornellBody(cornell);
+    }
+
     return {
-      body: typeof value.body === 'string' ? value.body : '',
+      body,
       savedBody: typeof value.savedBody === 'string' ? value.savedBody : '',
       noteTitle,
       manualFilename: typeof value.manualFilename === 'string' && value.manualFilename.trim()
@@ -535,13 +566,11 @@
       filenameFallbackAt: typeof value.filenameFallbackAt === 'string' && value.filenameFallbackAt
         ? value.filenameFallbackAt
         : null,
-      noteMode: ['freeform', 'cornell', 'review'].includes(value.noteMode)
-        ? value.noteMode
-        : 'freeform',
+      noteMode,
       savedNoteMode: ['freeform', 'cornell'].includes(value.savedNoteMode)
         ? value.savedNoteMode
-        : (typeof value.lastSavedAt === 'string' && value.lastSavedAt ? 'freeform' : null),
-      cornell: normalizeCornellState(value.cornell),
+        : null,
+      cornell,
       savedCornellSnapshot: typeof value.savedCornellSnapshot === 'string'
         ? value.savedCornellSnapshot
         : null,
@@ -581,20 +610,11 @@
   function isDirty() {
     if (!activeState) return false;
 
-    const outputMode = activeOutputMode();
-    const contentChanged = outputMode === 'freeform'
-      ? activeState.body !== activeState.savedBody
-      : cornellSnapshot(activeState.cornell) !==
-        (activeState.savedCornellSnapshot || cornellSnapshot(null));
-
-    const modeChanged = Boolean(activeState.lastSavedAt) &&
-      Boolean(activeState.savedNoteMode) &&
-      outputMode !== activeState.savedNoteMode;
-
+    const contentChanged = activeState.body !== activeState.savedBody;
     const filenameChanged = Boolean(activeState.filename) &&
       currentFilename() !== activeState.filename;
 
-    return contentChanged || modeChanged || filenameChanged;
+    return contentChanged || filenameChanged;
   }
 
   function ensureCornellStarterBlock() {
@@ -609,6 +629,14 @@
   function setNoteMode(mode) {
     if (!activeState || !['freeform', 'cornell', 'review'].includes(mode)) return;
     if (activeState.noteMode === mode) return;
+
+    if (activeState.noteMode === 'cornell') {
+      syncBodyFromCornell();
+    }
+
+    if (mode === 'cornell' || mode === 'review') {
+      syncCornellFromBody({ canonicalize: true });
+    }
 
     if (mode === 'cornell') {
       ensureCornellStarterBlock();
