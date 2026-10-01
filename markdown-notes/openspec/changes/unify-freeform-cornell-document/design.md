@@ -74,7 +74,7 @@ Switching to Libre therefore only renders the already-updated canonical body.
 
 ### Libre -> Cornell
 
-Libre edits update only `activeState.body` while the user types.
+Libre edits update `activeState.body` while the user types and invalidate the cached Cornell projection. Because `body` is authoritative, the stale projection must not survive as if it were an independent document.
 
 When switching to Cornell or Repaso:
 
