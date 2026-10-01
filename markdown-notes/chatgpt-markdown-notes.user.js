@@ -658,6 +658,7 @@
 
     const block = createCornellBlock();
     activeState.cornell.blocks.push(block);
+    syncBodyFromCornell();
     renderCornellEditor();
     renderSaveButton();
     updateStatus();
@@ -681,6 +682,7 @@
 
     const [block] = blocks.splice(index, 1);
     blocks.splice(nextIndex, 0, block);
+    syncBodyFromCornell();
 
     renderCornellEditor();
     renderSaveButton();
@@ -711,6 +713,7 @@
     }
 
     activeState.cornell.blocks.splice(index, 1);
+    syncBodyFromCornell();
     renderCornellEditor();
     renderSaveButton();
     updateStatus();
@@ -1688,6 +1691,7 @@
       if (!block || !['cue', 'notes'].includes(field)) return;
 
       block[field] = event.target.value;
+      syncBodyFromCornell();
       renderSaveButton();
       updateStatus();
       scheduleDraftPersistence();
@@ -1711,6 +1715,7 @@
       if (!activeState?.cornell) return;
 
       activeState.cornell.summary = event.target.value;
+      syncBodyFromCornell();
       renderSaveButton();
       updateStatus();
       scheduleDraftPersistence();
