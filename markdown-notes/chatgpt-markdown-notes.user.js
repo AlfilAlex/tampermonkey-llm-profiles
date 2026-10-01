@@ -999,7 +999,7 @@
     const title = currentNoteTitle();
     const chatId = getChatId();
     const chatUrl = getChatUrl();
-    const outputMode = activeOutputMode();
+    const body = String(activeState.body || '').trim();
 
     const created = activeState.createdAt || localIsoTimestamp();
     const updated = localIsoTimestamp();
@@ -1012,7 +1012,7 @@
       `source: ${yamlString('ChatGPT')}`
     ];
 
-    if (outputMode === 'cornell') {
+    if (isCornellBody(body)) {
       lines.push(`note_method: ${yamlString('cornell')}`);
     }
 
@@ -1025,41 +1025,8 @@
       ''
     );
 
-    if (outputMode === 'freeform') {
-      const body = String(activeState.body || '').trim();
-
-      if (body) {
-        lines.push(body, '');
-      }
-
-      return lines.join('\n');
-    }
-
-    lines.push('## Cornell Notes', '');
-
-    const blocks = activeState.cornell.blocks.filter(block =>
-      String(block.cue || '').trim() || String(block.notes || '').trim()
-    );
-
-    blocks.forEach((block, index) => {
-      const cue = String(block.cue || '')
-        .replace(/\s+/g, ' ')
-        .trim();
-      const notes = String(block.notes || '').trim();
-      const heading = cue || 'Nota';
-
-      lines.push(`### ${index + 1}. ${heading}`, '');
-
-      if (notes) {
-        lines.push(notes, '');
-      }
-    });
-
-    lines.push('## Summary', '');
-
-    const summary = String(activeState.cornell.summary || '').trim();
-    if (summary) {
-      lines.push(summary, '');
+    if (body) {
+      lines.push(body, '');
     }
 
     return lines.join('\n');
@@ -2160,7 +2127,7 @@
       return;
     }
 
-    if (activeState.body || hasCornellContent()) {
+    if (activeState.body) {
       setStatus('Borrador persistido localmente');
       return;
     }
@@ -2226,19 +2193,9 @@
       );
 
       // Sólo después de una escritura exitosa registramos el nombre del archivo
-      // que realmente existe en disco y el snapshot correspondiente al modo
-      // que produjo el archivo.
+      // y el cuerpo canónico que realmente se escribió.
       activeState.filename = targetFilename;
-
-      const outputMode = activeOutputMode();
-      activeState.savedNoteMode = outputMode;
-
-      if (outputMode === 'freeform') {
-        activeState.savedBody = activeState.body;
-      } else {
-        activeState.savedCornellSnapshot = cornellSnapshot(activeState.cornell);
-      }
-
+      activeState.savedBody = activeState.body;
       activeState.lastSavedAt = localIsoTimestamp();
 
       await persistActiveState();
@@ -2387,7 +2344,7 @@
       setPanelWidth(currentWidth, false);
     });
 
-    console.info('[ChatGPT Markdown Notes] v1.4.2 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.5.0 cargado');
   }
 
   bootstrap().catch(error => {
