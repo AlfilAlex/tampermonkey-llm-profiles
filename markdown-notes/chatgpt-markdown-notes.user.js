@@ -1734,6 +1734,11 @@
       if (!activeState) return;
 
       activeState.body = event.target.value;
+
+      // body es la fuente canónica. Cualquier proyección Cornell previa queda
+      // obsoleta hasta que el Markdown vuelva a parsearse al entrar a Cornell.
+      activeState.cornell = normalizeCornellState(null);
+
       renderSaveButton();
       updateStatus();
       scheduleDraftPersistence();
