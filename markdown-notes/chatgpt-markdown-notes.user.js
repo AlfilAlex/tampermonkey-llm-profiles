@@ -1501,6 +1501,31 @@
         opacity: 1;
       }
 
+      #${APP}-panel .tmn-markdown-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 6px 10px;
+        border-bottom: 1px solid rgba(127,127,127,.18);
+        background: rgba(0,0,0,.06);
+      }
+
+      #${APP}-panel .tmn-markdown-toolbar[hidden] {
+        display: none !important;
+      }
+
+      #${APP}-panel .tmn-markdown-toolbar button {
+        min-width: 30px;
+        min-height: 28px;
+        padding: 0 7px;
+        border-radius: 7px;
+        font-size: 11px;
+      }
+
+      #${APP}-panel .tmn-markdown-toolbar .tmn-md-wide {
+        min-width: 44px;
+      }
+
       #${APP}-panel .tmn-editor-wrap {
         min-height: 0;
         flex: 1;
@@ -1821,6 +1846,20 @@
         <button type="button" role="tab" data-mode="review">Repaso</button>
       </div>
 
+      <div class="tmn-markdown-toolbar" role="toolbar" aria-label="Formato Markdown">
+        <button type="button" data-md-action="bold" aria-label="Negrita" title="Negrita (Ctrl/Cmd+B)"><strong>B</strong></button>
+        <button type="button" data-md-action="italic" aria-label="Cursiva" title="Cursiva (Ctrl/Cmd+I)"><em>I</em></button>
+        <button type="button" data-md-action="h2" aria-label="Encabezado nivel 2" title="Encabezado H2">H2</button>
+        <button type="button" data-md-action="h3" aria-label="Encabezado nivel 3" title="Encabezado H3">H3</button>
+        <button type="button" data-md-action="bullet" aria-label="Lista con viñetas" title="Lista con viñetas">•</button>
+        <button type="button" data-md-action="ordered" aria-label="Lista numerada" title="Lista numerada">1.</button>
+        <button type="button" data-md-action="task" aria-label="Lista de tareas" title="Lista de tareas">☐</button>
+        <button type="button" data-md-action="quote" aria-label="Cita" title="Cita">&gt;</button>
+        <button type="button" data-md-action="inlineCode" aria-label="Código inline" title="Código inline">&lt;/&gt;</button>
+        <button type="button" class="tmn-md-wide" data-md-action="codeBlock" aria-label="Bloque de código" title="Bloque de código">Code</button>
+        <button type="button" class="tmn-md-wide" data-md-action="link" aria-label="Enlace" title="Enlace (Ctrl/Cmd+K)">Link</button>
+      </div>
+
       <div class="tmn-editor-wrap">
         <textarea
           class="tmn-editor tmn-view"
@@ -1913,6 +1952,39 @@
       if (!button) return;
       setNoteMode(button.dataset.mode);
     });
+
+    const markdownToolbar = panel.querySelector('.tmn-markdown-toolbar');
+
+    markdownToolbar.addEventListener('pointerdown', event => {
+      const button = event.target instanceof Element
+        ? event.target.closest('button[data-md-action]')
+        : null;
+
+      if (button) {
+        event.preventDefault();
+      }
+    });
+
+    markdownToolbar.addEventListener('click', event => {
+      const button = event.target instanceof Element
+        ? event.target.closest('button[data-md-action]')
+        : null;
+
+      if (!button) return;
+      applyMarkdownAction(button.dataset.mdAction);
+    });
+
+    const rememberSelectionFromEvent = event => {
+      if (isMarkdownTextarea(event.target)) {
+        rememberMarkdownSelection(event.target);
+      }
+    };
+
+    panel.addEventListener('focusin', rememberSelectionFromEvent);
+    panel.addEventListener('select', rememberSelectionFromEvent);
+    panel.addEventListener('keyup', rememberSelectionFromEvent);
+    panel.addEventListener('mouseup', rememberSelectionFromEvent);
+    panel.addEventListener('input', rememberSelectionFromEvent);
 
     panel.querySelector('.tmn-add-block').addEventListener('click', addCornellBlock);
 
@@ -2336,6 +2408,8 @@
   function renderEditor() {
     if (!panel || !activeState) return;
 
+    renderMarkdownToolbar();
+
     const editor = panel.querySelector('.tmn-editor');
     const cornell = panel.querySelector('.tmn-cornell-editor');
     const review = panel.querySelector('.tmn-review');
@@ -2550,10 +2624,34 @@
   // ===========================================================================
 
   function onGlobalKeyDown(event) {
-    const isSave = (event.ctrlKey || event.metaKey) &&
-      event.key.toLowerCase() === 's';
+    if (!panel || panel.hidden) return;
 
-    if (!isSave || !panel || panel.hidden) return;
+    const modifier = event.ctrlKey || event.metaKey;
+    const key = event.key.toLowerCase();
+
+    if (
+      modifier &&
+      !event.altKey &&
+      isMarkdownTextarea(event.target) &&
+      ['b', 'i', 'k'].includes(key)
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      rememberMarkdownSelection(event.target);
+
+      const action = key === 'b'
+        ? 'bold'
+        : key === 'i'
+          ? 'italic'
+          : 'link';
+
+      applyMarkdownAction(action);
+      return;
+    }
+
+    const isSave = modifier && key === 's';
+    if (!isSave) return;
 
     const editor = panel.querySelector('.tmn-editor');
     const filenameInput = panel.querySelector('.tmn-file-name');
@@ -2617,7 +2715,7 @@
       setPanelWidth(currentWidth, false);
     });
 
-    console.info('[ChatGPT Markdown Notes] v1.5.0 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.6.0 cargado');
   }
 
   bootstrap().catch(error => {
