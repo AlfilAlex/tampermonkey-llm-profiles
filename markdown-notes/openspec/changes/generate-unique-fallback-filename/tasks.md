@@ -10,17 +10,17 @@
 
 ## Implementation
 
-- [ ] Add persisted short fallback identifier to normalized draft state.
-- [ ] Generate short fallback ID using browser crypto APIs with compatibility fallback.
-- [ ] Generate ID and timestamp together only when fallback naming is required.
-- [ ] Replace chat-ID/timestamp-only automatic fallback with short-ID plus timestamp.
-- [ ] Preserve title-derived and manual filename precedence.
-- [ ] Preserve existing filesystem save semantics.
-- [ ] Update README and userscript semantic version.
+- [x] Add persisted short fallback identifier to normalized draft state.
+- [x] Generate short fallback ID using browser crypto APIs with compatibility fallback.
+- [x] Generate ID and timestamp together only when fallback naming is required.
+- [x] Replace chat-ID/timestamp-only automatic fallback with short-ID plus timestamp.
+- [x] Preserve title-derived and manual filename precedence.
+- [x] Preserve existing filesystem save semantics.
+- [x] Update README and userscript semantic version to v1.4.1.
 
 ## Validation
 
-- [ ] Parse the modified userscript successfully.
+- [x] Parse the modified userscript successfully with the V8 JavaScript parser.
 - [ ] Verify fallback format matches `<8 hex>_<YYYY-MM-DD_HH-mm-ss>.md`.
 - [ ] Verify rerender/reload reuses the generated identity.
 - [ ] Verify a real title supersedes the generated fallback when no manual override exists.
