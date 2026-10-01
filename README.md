@@ -31,7 +31,7 @@ No existe un OpenSpec compartido en la raíz: compartir repositorio no implica c
 - Permite crear perfiles adicionales desde la interfaz.
 - Mantiene ON/OFF y perfil seleccionado por conversación.
 
-### ChatGPT Markdown Notes v1.4.1
+### ChatGPT Markdown Notes v1.4.2
 
 - Panel lateral de notas Markdown persistente por conversación.
 - El panel está acoplado al layout en escritorio: reserva espacio y no tapa los mensajes.

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.4.1
+// @version      1.4.2
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -172,7 +172,12 @@
       title === 'chatgpt' ||
       title === 'nuevo chat' ||
       title === 'new chat' ||
-      title === 'chat'
+      title === 'chat' ||
+      title === 'saltar al contenido' ||
+      title === 'saltar al contenido principal' ||
+      title === 'ir al contenido' ||
+      title === 'skip to content' ||
+      title === 'skip to main content'
     );
   }
 
@@ -182,10 +187,20 @@
 
   function titleFromSidebarLink() {
     const currentPath = location.pathname;
+    const chatId = getChatId();
+
+    // Un chat nuevo sin /c/<id> no tiene todavía un enlace de conversación
+    // estable en el sidebar. Evitamos considerar navegación de la propia página.
+    if (!chatId) return '';
 
     for (const anchor of document.querySelectorAll('a[href]')) {
       try {
-        const url = new URL(anchor.href, location.href);
+        const rawHref = anchor.getAttribute('href') || '';
+        const url = new URL(rawHref, location.href);
+
+        // Enlaces de accesibilidad como href="#main" heredan el pathname
+        // actual, por lo que comparar solo pathname produce falsos positivos.
+        if (url.hash) continue;
         if (url.pathname !== currentPath) continue;
 
         // ChatGPT cambia con frecuencia la estructura del sidebar. Preferimos
@@ -349,7 +364,9 @@
     // v1.2.0 podía persistir el fallback "Nota de ChatGPT" como si fuera el
     // título real. Lo tratamos como no resuelto para que pueda autocorregirse
     // cuando ChatGPT exponga el título verdadero.
-    const noteTitle = storedTitle && !isFallbackNoteTitle(storedTitle)
+    const noteTitle = storedTitle &&
+      !isFallbackNoteTitle(storedTitle) &&
+      !isGenericTitle(storedTitle)
       ? storedTitle
       : null;
 
@@ -2189,7 +2206,7 @@
       setPanelWidth(currentWidth, false);
     });
 
-    console.info('[ChatGPT Markdown Notes] v1.4.1 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.4.2 cargado');
   }
 
   bootstrap().catch(error => {
