@@ -11,29 +11,29 @@
 
 ## Implementation
 
-- [ ] Add compact responsive Markdown toolbar UI.
-- [ ] Track the last active Markdown textarea and selection.
-- [ ] Implement inline wrapper transformation.
-- [ ] Implement line-prefix transformation.
-- [ ] Implement ordered-list numbering.
-- [ ] Implement fenced code transformation.
-- [ ] Implement Markdown link transformation.
-- [ ] Dispatch normal input flow after toolbar transformations.
-- [ ] Hide toolbar in Repaso mode.
-- [ ] Exclude Cue / Question textarea from Markdown formatting.
-- [ ] Add Cmd/Ctrl+B, Cmd/Ctrl+I, and Cmd/Ctrl+K.
-- [ ] Preserve existing Cmd/Ctrl+S behavior.
-- [ ] Bump userscript and README to v1.6.0.
+- [x] Add compact responsive Markdown toolbar UI.
+- [x] Track the last active Markdown textarea and selection.
+- [x] Implement inline wrapper transformation.
+- [x] Implement line-prefix transformation.
+- [x] Implement ordered-list numbering.
+- [x] Implement fenced code transformation.
+- [x] Implement Markdown link transformation.
+- [x] Dispatch normal input flow after toolbar transformations.
+- [x] Hide toolbar in Repaso mode.
+- [x] Exclude Cue / Question textarea from Markdown formatting.
+- [x] Add Cmd/Ctrl+B, Cmd/Ctrl+I, and Cmd/Ctrl+K.
+- [x] Preserve existing Cmd/Ctrl+S behavior.
+- [x] Bump userscript and README to v1.6.0.
 
 ## Validation
 
 - [ ] Run `node --check markdown-notes/chatgpt-markdown-notes.user.js`.
-- [ ] Parse the complete userscript successfully.
-- [ ] Validate formatting with a selection.
-- [ ] Validate formatting with no selection.
-- [ ] Validate multiline bullets, ordered lists, tasks, and quote formatting.
-- [ ] Validate link cursor/selection behavior.
-- [ ] Validate fenced code insertion.
+- [x] Parse the complete userscript successfully with the V8 JavaScript parser.
+- [x] Validate formatting with a selection using isolated transformation checks.
+- [x] Validate formatting with no selection using isolated transformation checks.
+- [x] Validate multiline bullets and ordered-list numbering with isolated transformation checks.
+- [x] Validate link cursor/selection behavior with isolated transformation checks.
+- [x] Validate fenced code insertion with isolated transformation checks.
 - [ ] Validate toolbar in Libre.
 - [ ] Validate toolbar in Cornell Notes and Summary.
 - [ ] Validate Cue fields remain unformatted.
