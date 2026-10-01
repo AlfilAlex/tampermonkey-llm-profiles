@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.4.2
+// @version      1.5.0
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -299,38 +299,186 @@
     };
   }
 
-  function cornellSnapshot(value) {
+  function cornellHasContent(value) {
     const cornell = value && typeof value === 'object'
       ? value
       : { blocks: [], summary: '' };
 
-    return JSON.stringify({
-      blocks: Array.isArray(cornell.blocks)
-        ? cornell.blocks
-          .filter(block => String(block?.cue || '').trim() || String(block?.notes || '').trim())
-          .map(block => ({
-            id: String(block.id || ''),
-            cue: String(block.cue || ''),
-            notes: String(block.notes || '')
-          }))
-        : [],
-      summary: String(cornell.summary || '')
-    });
-  }
-
-  function activeOutputMode() {
-    return activeState?.noteMode === 'freeform' ? 'freeform' : 'cornell';
-  }
-
-  function hasCornellContent() {
-    if (!activeState?.cornell) return false;
-
     return Boolean(
-      activeState.cornell.summary.trim() ||
-      activeState.cornell.blocks.some(block =>
-        String(block.cue || '').trim() || String(block.notes || '').trim()
-      )
+      String(cornell.summary || '').trim() ||
+      (Array.isArray(cornell.blocks) && cornell.blocks.some(block =>
+        String(block?.cue || '').trim() || String(block?.notes || '').trim()
+      ))
     );
+  }
+
+  function serializeCornellBody(value) {
+    const cornell = normalizeCornellState(value);
+    const lines = ['## Cornell Notes', ''];
+
+    const blocks = cornell.blocks.filter(block =>
+      String(block.cue || '').trim() || String(block.notes || '').trim()
+    );
+
+    blocks.forEach((block, index) => {
+      const cue = String(block.cue || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const notes = String(block.notes || '').trim();
+      const heading = cue || 'Nota';
+
+      lines.push(`### ${index + 1}. ${heading}`, '');
+
+      if (notes) {
+        lines.push(notes, '');
+      }
+    });
+
+    lines.push('## Summary', '');
+
+    const summary = String(cornell.summary || '').trim();
+    if (summary) {
+      lines.push(summary, '');
+    }
+
+    return lines.join('\n').trimEnd();
+  }
+
+  function findCornellStructure(lines) {
+    let fenceChar = '';
+    let fenceLength = 0;
+    let startIndex = -1;
+    let summaryIndex = -1;
+    const blockIndexes = [];
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      const fence = line.match(/^\s*((?:[\x60]{3,})|(?:~{3,}))/);
+
+      if (fence) {
+        const token = fence[1];
+
+        if (!fenceChar) {
+          fenceChar = token[0];
+          fenceLength = token.length;
+        } else if (token[0] === fenceChar && token.length >= fenceLength) {
+          fenceChar = '';
+          fenceLength = 0;
+        }
+
+        continue;
+      }
+
+      if (fenceChar) continue;
+
+      const trimmed = line.trim();
+
+      if (startIndex < 0) {
+        if (trimmed === '## Cornell Notes') {
+          startIndex = index;
+        }
+        continue;
+      }
+
+      if (summaryIndex < 0 && trimmed === '## Summary') {
+        summaryIndex = index;
+        continue;
+      }
+
+      if (
+        summaryIndex < 0 &&
+        /^###\s+\d+\.\s+.+\s*$/.test(line)
+      ) {
+        blockIndexes.push(index);
+      }
+    }
+
+    return { startIndex, summaryIndex, blockIndexes };
+  }
+
+  function parseCornellBody(value) {
+    const body = String(value || '').replace(/\r\n?/g, '\n');
+    const lines = body.split('\n');
+    const { startIndex, summaryIndex, blockIndexes } = findCornellStructure(lines);
+
+    if (startIndex < 0 || summaryIndex <= startIndex) return null;
+
+    if (lines.slice(0, startIndex).some(line => line.trim())) return null;
+
+    const sectionLines = lines.slice(startIndex + 1, summaryIndex);
+    const sectionHasContent = sectionLines.some(line => line.trim());
+
+    if (sectionHasContent && blockIndexes.length === 0) return null;
+
+    const blocks = [];
+
+    for (let i = 0; i < blockIndexes.length; i += 1) {
+      const absoluteStart = blockIndexes[i];
+      const absoluteEnd = i + 1 < blockIndexes.length
+        ? blockIndexes[i + 1]
+        : summaryIndex;
+
+      const heading = lines[absoluteStart].match(/^###\s+\d+\.\s+(.+?)\s*$/);
+      if (!heading) return null;
+
+      const label = heading[1].trim();
+      const notes = lines
+        .slice(absoluteStart + 1, absoluteEnd)
+        .join('\n')
+        .trim();
+
+      blocks.push(createCornellBlock({
+        cue: label.toLowerCase() === 'nota' ? '' : label,
+        notes
+      }));
+    }
+
+    return {
+      blocks,
+      summary: lines.slice(summaryIndex + 1).join('\n').trim()
+    };
+  }
+
+  function isCornellBody(value) {
+    return parseCornellBody(value) !== null;
+  }
+
+  function importBodyAsCornell(value) {
+    const body = String(value || '').trim();
+
+    return {
+      blocks: body
+        ? [createCornellBlock({ cue: '', notes: body })]
+        : [],
+      summary: ''
+    };
+  }
+
+  function syncBodyFromCornell() {
+    if (!activeState?.cornell) return;
+
+    activeState.body = serializeCornellBody(activeState.cornell);
+  }
+
+  function syncCornellFromBody({ canonicalize = true } = {}) {
+    if (!activeState) return false;
+
+    const parsed = parseCornellBody(activeState.body);
+
+    if (parsed) {
+      activeState.cornell = normalizeCornellState(parsed);
+      return true;
+    }
+
+    activeState.cornell = normalizeCornellState(
+      importBodyAsCornell(activeState.body)
+    );
+
+    if (canonicalize) {
+      syncBodyFromCornell();
+    }
+
+    return false;
   }
 
   function createEmptyState() {
