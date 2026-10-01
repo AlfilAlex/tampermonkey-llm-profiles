@@ -30,9 +30,9 @@
 - [ ] Validate Cornell -> Libre shows the same content immediately.
 - [ ] Validate Libre edit -> Cornell rebuilds the expected blocks.
 - [x] Validate arbitrary freeform Markdown enters Cornell without losing text using a parser/serializer round-trip check.
-- [ ] Validate a legacy body-only draft remains unchanged.
-- [ ] Validate a legacy Cornell-only draft migrates into body.
-- [ ] Validate a legacy draft containing both contents preserves both.
+- [x] Validate a legacy body-only draft remains unchanged with an isolated migration check.
+- [x] Validate a legacy Cornell-only draft migrates into body with an isolated migration check.
+- [x] Validate a legacy draft containing both contents preserves both with an isolated migration check.
 - [ ] Validate reload restores the same canonical body and selected view.
 - [ ] Validate conversation switching keeps documents isolated.
 - [ ] Validate save from Libre and Cornell produces the same canonical document.
