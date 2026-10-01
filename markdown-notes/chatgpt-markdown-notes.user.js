@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.4.0
+// @version      1.4.1
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -325,7 +325,8 @@
       noteTitle: null,
       manualFilename: null,
       filename: null,
-      filenameFallbackAt: new Date().toISOString(),
+      filenameFallbackId: null,
+      filenameFallbackAt: null,
       noteMode: 'freeform',
       savedNoteMode: null,
       cornell: normalizeCornellState(null),
@@ -362,9 +363,13 @@
       filename: typeof value.filename === 'string' && value.filename.trim()
         ? value.filename
         : null,
+      filenameFallbackId: typeof value.filenameFallbackId === 'string' &&
+        /^[a-f0-9]{8}$/i.test(value.filenameFallbackId.trim())
+        ? value.filenameFallbackId.trim().toLowerCase()
+        : null,
       filenameFallbackAt: typeof value.filenameFallbackAt === 'string' && value.filenameFallbackAt
         ? value.filenameFallbackAt
-        : base.filenameFallbackAt,
+        : null,
       noteMode: ['freeform', 'cornell', 'review'].includes(value.noteMode)
         ? value.noteMode
         : 'freeform',
@@ -578,14 +583,69 @@
     return `${stem}${extension}`;
   }
 
-  function timestampFilename(value = activeState?.filenameFallbackAt) {
-    let date = value ? new Date(value) : new Date();
+  function shortFallbackId() {
+    const browserCrypto = globalThis.crypto;
+
+    if (typeof browserCrypto?.randomUUID === 'function') {
+      return browserCrypto.randomUUID().replaceAll('-', '').slice(0, 8).toLowerCase();
+    }
+
+    if (typeof browserCrypto?.getRandomValues === 'function') {
+      const bytes = new Uint8Array(4);
+      browserCrypto.getRandomValues(bytes);
+
+      return Array.from(bytes, byte =>
+        byte.toString(16).padStart(2, '0')
+      ).join('');
+    }
+
+    return Math.floor(Math.random() * 0xffffffff)
+      .toString(16)
+      .padStart(8, '0')
+      .slice(0, 8);
+  }
+
+  function ensureGeneratedFilenameIdentity() {
+    if (!activeState) {
+      return {
+        id: shortFallbackId(),
+        at: new Date().toISOString()
+      };
+    }
+
+    const validId = typeof activeState.filenameFallbackId === 'string' &&
+      /^[a-f0-9]{8}$/i.test(activeState.filenameFallbackId);
+
+    const validAt = typeof activeState.filenameFallbackAt === 'string' &&
+      !Number.isNaN(new Date(activeState.filenameFallbackAt).getTime());
+
+    if (!validId) {
+      // Migración desde el fallback anterior: ID y fecha nacen juntos bajo la
+      // nueva regla. No reutilizamos un timestamp legacy aislado.
+      activeState.filenameFallbackId = shortFallbackId();
+      activeState.filenameFallbackAt = new Date().toISOString();
+      scheduleDraftPersistence();
+    } else if (!validAt) {
+      activeState.filenameFallbackAt = new Date().toISOString();
+      scheduleDraftPersistence();
+    }
+
+    return {
+      id: activeState.filenameFallbackId,
+      at: activeState.filenameFallbackAt
+    };
+  }
+
+  function generatedFallbackFilename() {
+    const identity = ensureGeneratedFilenameIdentity();
+    let date = new Date(identity.at);
 
     if (Number.isNaN(date.getTime())) {
       date = new Date();
     }
 
     return (
+      `${identity.id}_` +
       `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}_` +
       `${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}.md`
     );
@@ -595,10 +655,7 @@
     const title = activeState?.noteTitle || getDetectedChatTitle();
     if (title) return `${slugify(title)}.md`;
 
-    const chatId = getChatId();
-    if (chatId) return normalizeFilename(chatId);
-
-    return timestampFilename();
+    return generatedFallbackFilename();
   }
 
   function currentFilename() {
@@ -2132,7 +2189,7 @@
       setPanelWidth(currentWidth, false);
     });
 
-    console.info('[ChatGPT Markdown Notes] v1.4.0 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.4.1 cargado');
   }
 
   bootstrap().catch(error => {
