@@ -31,7 +31,7 @@
 - [x] Parse the complete userscript successfully with the V8 JavaScript parser.
 - [x] Validate formatting with a selection using isolated transformation checks.
 - [x] Validate formatting with no selection using isolated transformation checks.
-- [x] Validate multiline bullets and ordered-list numbering with isolated transformation checks.
+- [x] Validate H2/H3, multiline bullets, ordered lists, tasks, and quote formatting with isolated transformation checks.
 - [x] Validate link cursor/selection behavior with isolated transformation checks.
 - [x] Validate fenced code insertion with isolated transformation checks.
 - [ ] Validate toolbar in Libre.
