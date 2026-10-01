@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.5.0
+// @version      1.6.0
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -43,6 +43,8 @@
 
   let reviewIndex = 0;
   let reviewRevealed = false;
+
+  let markdownSelection = null;
 
   // ===========================================================================
   // IndexedDB
@@ -1033,6 +1035,289 @@
   }
 
   // ===========================================================================
+  // Herramientas Markdown
+  // ===========================================================================
+
+  function isMarkdownTextarea(target) {
+    return target instanceof HTMLTextAreaElement && (
+      target.classList.contains('tmn-editor') ||
+      target.classList.contains('tmn-block-notes') ||
+      target.classList.contains('tmn-summary-editor')
+    );
+  }
+
+  function rememberMarkdownSelection(target) {
+    if (!isMarkdownTextarea(target)) return;
+
+    markdownSelection = {
+      target,
+      start: target.selectionStart ?? 0,
+      end: target.selectionEnd ?? 0
+    };
+  }
+
+  function defaultMarkdownTarget() {
+    if (!panel || !activeState || activeState.noteMode === 'review') return null;
+
+    if (activeState.noteMode === 'freeform') {
+      return panel.querySelector('.tmn-editor');
+    }
+
+    return panel.querySelector('.tmn-block-notes') ||
+      panel.querySelector('.tmn-summary-editor');
+  }
+
+  function isMarkdownTargetForActiveMode(target) {
+    if (!isMarkdownTextarea(target) || !activeState) return false;
+
+    if (activeState.noteMode === 'freeform') {
+      return target.classList.contains('tmn-editor');
+    }
+
+    if (activeState.noteMode === 'cornell') {
+      return (
+        target.classList.contains('tmn-block-notes') ||
+        target.classList.contains('tmn-summary-editor')
+      );
+    }
+
+    return false;
+  }
+
+  function resolveMarkdownTarget() {
+    const remembered = markdownSelection?.target;
+
+    if (
+      isMarkdownTargetForActiveMode(remembered) &&
+      remembered.isConnected &&
+      panel?.contains(remembered)
+    ) {
+      return remembered;
+    }
+
+    const target = defaultMarkdownTarget();
+
+    if (target) {
+      rememberMarkdownSelection(target);
+    }
+
+    return target;
+  }
+
+  function selectionForTarget(target) {
+    const valueLength = target.value.length;
+
+    if (markdownSelection?.target === target) {
+      return {
+        start: Math.max(0, Math.min(markdownSelection.start, valueLength)),
+        end: Math.max(0, Math.min(markdownSelection.end, valueLength))
+      };
+    }
+
+    return {
+      start: target.selectionStart ?? 0,
+      end: target.selectionEnd ?? 0
+    };
+  }
+
+  function commitMarkdownEdit(target, start, end, replacement, selectionStart, selectionEnd) {
+    target.setRangeText(replacement, start, end, 'end');
+    target.focus();
+
+    const nextStart = Number.isInteger(selectionStart)
+      ? selectionStart
+      : start + replacement.length;
+    const nextEnd = Number.isInteger(selectionEnd)
+      ? selectionEnd
+      : nextStart;
+
+    target.setSelectionRange(nextStart, nextEnd);
+    rememberMarkdownSelection(target);
+
+    target.dispatchEvent(new Event('input', {
+      bubbles: true,
+      composed: true
+    }));
+  }
+
+  function applyInlineWrapper(prefix, suffix, placeholder) {
+    const target = resolveMarkdownTarget();
+    if (!target) return;
+
+    const { start, end } = selectionForTarget(target);
+    const selected = target.value.slice(start, end);
+    const content = selected || placeholder;
+    const replacement = prefix + content + suffix;
+    const innerStart = start + prefix.length;
+    const innerEnd = innerStart + content.length;
+
+    commitMarkdownEdit(
+      target,
+      start,
+      end,
+      replacement,
+      innerStart,
+      innerEnd
+    );
+  }
+
+  function selectedLineRange(target) {
+    const { start, end } = selectionForTarget(target);
+    const value = target.value;
+
+    const lineStart = value.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+    const probeEnd = end > start ? end - 1 : end;
+    const newlineAfter = value.indexOf('\n', probeEnd);
+    const lineEnd = newlineAfter === -1 ? value.length : newlineAfter;
+
+    return {
+      start: lineStart,
+      end: lineEnd,
+      text: value.slice(lineStart, lineEnd)
+    };
+  }
+
+  function applyLinePrefix(prefixFactory) {
+    const target = resolveMarkdownTarget();
+    if (!target) return;
+
+    const range = selectedLineRange(target);
+    const lines = range.text.split('\n');
+    const replacement = lines
+      .map((line, index) => prefixFactory(index) + line)
+      .join('\n');
+
+    commitMarkdownEdit(
+      target,
+      range.start,
+      range.end,
+      replacement,
+      range.start,
+      range.start + replacement.length
+    );
+  }
+
+  function applyFencedCode() {
+    const target = resolveMarkdownTarget();
+    if (!target) return;
+
+    const { start, end } = selectionForTarget(target);
+    const selected = target.value.slice(start, end);
+    const fence = String.fromCharCode(96).repeat(3);
+
+    if (selected) {
+      const replacement = fence + '\n' + selected + '\n' + fence;
+      const innerStart = start + fence.length + 1;
+      const innerEnd = innerStart + selected.length;
+
+      commitMarkdownEdit(
+        target,
+        start,
+        end,
+        replacement,
+        innerStart,
+        innerEnd
+      );
+      return;
+    }
+
+    const replacement = fence + '\n\n' + fence;
+    const caret = start + fence.length + 1;
+
+    commitMarkdownEdit(
+      target,
+      start,
+      end,
+      replacement,
+      caret,
+      caret
+    );
+  }
+
+  function applyInlineCode() {
+    const target = resolveMarkdownTarget();
+    if (!target) return;
+
+    const { start, end } = selectionForTarget(target);
+    const selected = target.value.slice(start, end);
+
+    if (selected.includes('\n')) {
+      applyFencedCode();
+      return;
+    }
+
+    applyInlineWrapper(
+      String.fromCharCode(96),
+      String.fromCharCode(96),
+      'código'
+    );
+  }
+
+  function applyMarkdownLink() {
+    const target = resolveMarkdownTarget();
+    if (!target) return;
+
+    const { start, end } = selectionForTarget(target);
+    const selected = target.value.slice(start, end);
+
+    if (selected) {
+      const replacement = '[' + selected + '](https://)';
+      const urlStart = start + selected.length + 3;
+      const urlEnd = urlStart + 'https://'.length;
+
+      commitMarkdownEdit(
+        target,
+        start,
+        end,
+        replacement,
+        urlStart,
+        urlEnd
+      );
+      return;
+    }
+
+    const replacement = '[texto](https://)';
+    const textStart = start + 1;
+    const textEnd = textStart + 'texto'.length;
+
+    commitMarkdownEdit(
+      target,
+      start,
+      end,
+      replacement,
+      textStart,
+      textEnd
+    );
+  }
+
+  function applyMarkdownAction(action) {
+    const actions = {
+      bold: () => applyInlineWrapper('**', '**', 'texto'),
+      italic: () => applyInlineWrapper('*', '*', 'texto'),
+      h2: () => applyLinePrefix(() => '## '),
+      h3: () => applyLinePrefix(() => '### '),
+      bullet: () => applyLinePrefix(() => '- '),
+      ordered: () => applyLinePrefix(index => `${index + 1}. `),
+      task: () => applyLinePrefix(() => '- [ ] '),
+      quote: () => applyLinePrefix(() => '> '),
+      inlineCode: applyInlineCode,
+      codeBlock: applyFencedCode,
+      link: applyMarkdownLink
+    };
+
+    actions[action]?.();
+  }
+
+  function renderMarkdownToolbar() {
+    if (!panel || !activeState) return;
+
+    const toolbar = panel.querySelector('.tmn-markdown-toolbar');
+    if (!toolbar) return;
+
+    toolbar.hidden = activeState.noteMode === 'review';
+  }
+
+  // ===========================================================================
   // UI
   // ===========================================================================
 
@@ -1231,6 +1516,31 @@
         background: #f5f5f5;
         color: #151515;
         opacity: 1;
+      }
+
+      #${APP}-panel .tmn-markdown-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 6px 10px;
+        border-bottom: 1px solid rgba(127,127,127,.18);
+        background: rgba(0,0,0,.06);
+      }
+
+      #${APP}-panel .tmn-markdown-toolbar[hidden] {
+        display: none !important;
+      }
+
+      #${APP}-panel .tmn-markdown-toolbar button {
+        min-width: 30px;
+        min-height: 28px;
+        padding: 0 7px;
+        border-radius: 7px;
+        font-size: 11px;
+      }
+
+      #${APP}-panel .tmn-markdown-toolbar .tmn-md-wide {
+        min-width: 44px;
       }
 
       #${APP}-panel .tmn-editor-wrap {
@@ -1553,6 +1863,20 @@
         <button type="button" role="tab" data-mode="review">Repaso</button>
       </div>
 
+      <div class="tmn-markdown-toolbar" role="toolbar" aria-label="Formato Markdown">
+        <button type="button" data-md-action="bold" aria-label="Negrita" title="Negrita (Ctrl/Cmd+B)"><strong>B</strong></button>
+        <button type="button" data-md-action="italic" aria-label="Cursiva" title="Cursiva (Ctrl/Cmd+I)"><em>I</em></button>
+        <button type="button" data-md-action="h2" aria-label="Encabezado nivel 2" title="Encabezado H2">H2</button>
+        <button type="button" data-md-action="h3" aria-label="Encabezado nivel 3" title="Encabezado H3">H3</button>
+        <button type="button" data-md-action="bullet" aria-label="Lista con viñetas" title="Lista con viñetas">•</button>
+        <button type="button" data-md-action="ordered" aria-label="Lista numerada" title="Lista numerada">1.</button>
+        <button type="button" data-md-action="task" aria-label="Lista de tareas" title="Lista de tareas">☐</button>
+        <button type="button" data-md-action="quote" aria-label="Cita" title="Cita">&gt;</button>
+        <button type="button" data-md-action="inlineCode" aria-label="Código inline" title="Código inline">&lt;/&gt;</button>
+        <button type="button" class="tmn-md-wide" data-md-action="codeBlock" aria-label="Bloque de código" title="Bloque de código">Code</button>
+        <button type="button" class="tmn-md-wide" data-md-action="link" aria-label="Enlace" title="Enlace (Ctrl/Cmd+K)">Link</button>
+      </div>
+
       <div class="tmn-editor-wrap">
         <textarea
           class="tmn-editor tmn-view"
@@ -1645,6 +1969,39 @@
       if (!button) return;
       setNoteMode(button.dataset.mode);
     });
+
+    const markdownToolbar = panel.querySelector('.tmn-markdown-toolbar');
+
+    markdownToolbar.addEventListener('pointerdown', event => {
+      const button = event.target instanceof Element
+        ? event.target.closest('button[data-md-action]')
+        : null;
+
+      if (button) {
+        event.preventDefault();
+      }
+    });
+
+    markdownToolbar.addEventListener('click', event => {
+      const button = event.target instanceof Element
+        ? event.target.closest('button[data-md-action]')
+        : null;
+
+      if (!button) return;
+      applyMarkdownAction(button.dataset.mdAction);
+    });
+
+    const rememberSelectionFromEvent = event => {
+      if (isMarkdownTextarea(event.target)) {
+        rememberMarkdownSelection(event.target);
+      }
+    };
+
+    panel.addEventListener('focusin', rememberSelectionFromEvent);
+    panel.addEventListener('select', rememberSelectionFromEvent);
+    panel.addEventListener('keyup', rememberSelectionFromEvent);
+    panel.addEventListener('mouseup', rememberSelectionFromEvent);
+    panel.addEventListener('input', rememberSelectionFromEvent);
 
     panel.querySelector('.tmn-add-block').addEventListener('click', addCornellBlock);
 
@@ -2068,6 +2425,8 @@
   function renderEditor() {
     if (!panel || !activeState) return;
 
+    renderMarkdownToolbar();
+
     const editor = panel.querySelector('.tmn-editor');
     const cornell = panel.querySelector('.tmn-cornell-editor');
     const review = panel.querySelector('.tmn-review');
@@ -2282,10 +2641,34 @@
   // ===========================================================================
 
   function onGlobalKeyDown(event) {
-    const isSave = (event.ctrlKey || event.metaKey) &&
-      event.key.toLowerCase() === 's';
+    if (!panel || panel.hidden) return;
 
-    if (!isSave || !panel || panel.hidden) return;
+    const modifier = event.ctrlKey || event.metaKey;
+    const key = event.key.toLowerCase();
+
+    if (
+      modifier &&
+      !event.altKey &&
+      isMarkdownTextarea(event.target) &&
+      ['b', 'i', 'k'].includes(key)
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      rememberMarkdownSelection(event.target);
+
+      const action = key === 'b'
+        ? 'bold'
+        : key === 'i'
+          ? 'italic'
+          : 'link';
+
+      applyMarkdownAction(action);
+      return;
+    }
+
+    const isSave = modifier && key === 's';
+    if (!isSave) return;
 
     const editor = panel.querySelector('.tmn-editor');
     const filenameInput = panel.querySelector('.tmn-file-name');
@@ -2349,7 +2732,7 @@
       setPanelWidth(currentWidth, false);
     });
 
-    console.info('[ChatGPT Markdown Notes] v1.5.0 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.6.0 cargado');
   }
 
   bootstrap().catch(error => {
