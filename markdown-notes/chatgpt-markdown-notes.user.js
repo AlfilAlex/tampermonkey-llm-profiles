@@ -782,81 +782,6 @@
     return `${stem}${extension}`;
   }
 
-  function shortFallbackId() {
-    const browserCrypto = globalThis.crypto;
-
-    if (typeof browserCrypto?.randomUUID === 'function') {
-      return browserCrypto.randomUUID().replaceAll('-', '').slice(0, 8).toLowerCase();
-    }
-
-    if (typeof browserCrypto?.getRandomValues === 'function') {
-      const bytes = new Uint8Array(4);
-      browserCrypto.getRandomValues(bytes);
-
-      return Array.from(bytes, byte =>
-        byte.toString(16).padStart(2, '0')
-      ).join('');
-    }
-
-    return Math.floor(Math.random() * 0xffffffff)
-      .toString(16)
-      .padStart(8, '0')
-      .slice(0, 8);
-  }
-
-  function ensureGeneratedFilenameIdentity() {
-    if (!activeState) {
-      return {
-        id: shortFallbackId(),
-        at: new Date().toISOString()
-      };
-    }
-
-    const validId = typeof activeState.filenameFallbackId === 'string' &&
-      /^[a-f0-9]{8}$/i.test(activeState.filenameFallbackId);
-
-    const validAt = typeof activeState.filenameFallbackAt === 'string' &&
-      !Number.isNaN(new Date(activeState.filenameFallbackAt).getTime());
-
-    if (!validId) {
-      // Migración desde el fallback anterior: ID y fecha nacen juntos bajo la
-      // nueva regla. No reutilizamos un timestamp legacy aislado.
-      activeState.filenameFallbackId = shortFallbackId();
-      activeState.filenameFallbackAt = new Date().toISOString();
-      scheduleDraftPersistence();
-    } else if (!validAt) {
-      activeState.filenameFallbackAt = new Date().toISOString();
-      scheduleDraftPersistence();
-    }
-
-    return {
-      id: activeState.filenameFallbackId,
-      at: activeState.filenameFallbackAt
-    };
-  }
-
-  function generatedFallbackFilename() {
-    const identity = ensureGeneratedFilenameIdentity();
-    let date = new Date(identity.at);
-
-    if (Number.isNaN(date.getTime())) {
-      date = new Date();
-    }
-
-    return (
-      `${identity.id}_` +
-      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}_` +
-      `${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}.md`
-    );
-  }
-
-  function automaticFilename() {
-    const title = activeState?.noteTitle || getDetectedChatTitle();
-    if (title) return `${slugify(title)}.md`;
-
-    return generatedFallbackFilename();
-  }
-
   function currentFilename() {
     return normalizeFilename(activeState?.manualFilename);
   }
@@ -978,27 +903,6 @@
       .replaceAll('"', '\\"')
       .replaceAll('\r', '')
       .replaceAll('\n', '\\n')}"`;
-  }
-
-  function slugify(value) {
-    let slug = String(value || '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/&/g, ' y ')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .replace(/-+/g, '-')
-      .slice(0, 120)
-      .replace(/-+$/g, '');
-
-    if (!slug) slug = 'nota-chatgpt';
-
-    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(slug)) {
-      slug = `nota-${slug}`;
-    }
-
-    return slug;
   }
 
   function buildMarkdown() {
