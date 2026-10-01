@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.6.0
+// @version      1.6.1
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -613,8 +613,9 @@
     if (!activeState) return false;
 
     const contentChanged = activeState.body !== activeState.savedBody;
-    const filenameChanged = Boolean(activeState.filename) &&
-      currentFilename() !== activeState.filename;
+    const targetFilename = currentFilename();
+    const filenameChanged = Boolean(targetFilename) &&
+      targetFilename !== (activeState.filename || '');
 
     return contentChanged || filenameChanged;
   }
@@ -781,84 +782,12 @@
     return `${stem}${extension}`;
   }
 
-  function shortFallbackId() {
-    const browserCrypto = globalThis.crypto;
-
-    if (typeof browserCrypto?.randomUUID === 'function') {
-      return browserCrypto.randomUUID().replaceAll('-', '').slice(0, 8).toLowerCase();
-    }
-
-    if (typeof browserCrypto?.getRandomValues === 'function') {
-      const bytes = new Uint8Array(4);
-      browserCrypto.getRandomValues(bytes);
-
-      return Array.from(bytes, byte =>
-        byte.toString(16).padStart(2, '0')
-      ).join('');
-    }
-
-    return Math.floor(Math.random() * 0xffffffff)
-      .toString(16)
-      .padStart(8, '0')
-      .slice(0, 8);
-  }
-
-  function ensureGeneratedFilenameIdentity() {
-    if (!activeState) {
-      return {
-        id: shortFallbackId(),
-        at: new Date().toISOString()
-      };
-    }
-
-    const validId = typeof activeState.filenameFallbackId === 'string' &&
-      /^[a-f0-9]{8}$/i.test(activeState.filenameFallbackId);
-
-    const validAt = typeof activeState.filenameFallbackAt === 'string' &&
-      !Number.isNaN(new Date(activeState.filenameFallbackAt).getTime());
-
-    if (!validId) {
-      // Migración desde el fallback anterior: ID y fecha nacen juntos bajo la
-      // nueva regla. No reutilizamos un timestamp legacy aislado.
-      activeState.filenameFallbackId = shortFallbackId();
-      activeState.filenameFallbackAt = new Date().toISOString();
-      scheduleDraftPersistence();
-    } else if (!validAt) {
-      activeState.filenameFallbackAt = new Date().toISOString();
-      scheduleDraftPersistence();
-    }
-
-    return {
-      id: activeState.filenameFallbackId,
-      at: activeState.filenameFallbackAt
-    };
-  }
-
-  function generatedFallbackFilename() {
-    const identity = ensureGeneratedFilenameIdentity();
-    let date = new Date(identity.at);
-
-    if (Number.isNaN(date.getTime())) {
-      date = new Date();
-    }
-
-    return (
-      `${identity.id}_` +
-      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}_` +
-      `${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}.md`
-    );
-  }
-
-  function automaticFilename() {
-    const title = activeState?.noteTitle || getDetectedChatTitle();
-    if (title) return `${slugify(title)}.md`;
-
-    return generatedFallbackFilename();
-  }
-
   function currentFilename() {
-    const manual = normalizeFilename(activeState?.manualFilename);
-    return manual || automaticFilename();
+    return normalizeFilename(activeState?.manualFilename);
+  }
+
+  function hasManualFilename() {
+    return Boolean(currentFilename());
   }
 
   // ===========================================================================
@@ -974,27 +903,6 @@
       .replaceAll('"', '\\"')
       .replaceAll('\r', '')
       .replaceAll('\n', '\\n')}"`;
-  }
-
-  function slugify(value) {
-    let slug = String(value || '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/&/g, ' y ')
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .replace(/-+/g, '-')
-      .slice(0, 120)
-      .replace(/-+$/g, '');
-
-    if (!slug) slug = 'nota-chatgpt';
-
-    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(slug)) {
-      slug = `nota-${slug}`;
-    }
-
-    return slug;
   }
 
   function buildMarkdown() {
@@ -1841,7 +1749,8 @@
             class="tmn-file-name"
             type="text"
             aria-label="Nombre del archivo Markdown"
-            title="Editable. Vacíalo para volver al nombre automático."
+            title="Obligatorio para guardar. La extensión .md se añade automáticamente."
+            placeholder="Nombre del archivo (obligatorio)"
             spellcheck="false"
           >
         </div>
@@ -2455,6 +2364,7 @@
     if (!panel || !activeState) return;
 
     const button = panel.querySelector('.tmn-save');
+    const canSave = hasManualFilename();
 
     if (activeState.filename || activeState.lastSavedAt) {
       button.textContent = 'Guardar cambios';
@@ -2462,7 +2372,10 @@
       button.textContent = 'Guardar nota';
     }
 
-    button.disabled = saving;
+    button.disabled = saving || !canSave;
+    button.title = canSave
+      ? ''
+      : 'Escribe un nombre de archivo antes de guardar.';
   }
 
   function setStatus(message, kind = '') {
@@ -2478,6 +2391,11 @@
 
     if (saving) {
       setStatus('Guardando cambios…');
+      return;
+    }
+
+    if (!hasManualFilename()) {
+      setStatus('Escribe un nombre de archivo para poder guardar.');
       return;
     }
 
@@ -2515,7 +2433,18 @@
   async function saveFile() {
     if (saving || !activeState) return;
 
+    const targetFilename = currentFilename();
+
+    if (!targetFilename) {
+      setStatus('Escribe un nombre de archivo antes de guardar.', 'error');
+      panel?.querySelector('.tmn-file-name')?.focus();
+      return;
+    }
+
+    activeState.manualFilename = targetFilename;
+
     saving = true;
+    renderHeader();
     renderSaveButton();
     updateStatus();
 
@@ -2533,15 +2462,9 @@
         );
       }
 
-      // Si el título ya apareció, lo adoptamos para metadatos y para el nombre
-      // automático. Un nombre manual siempre tiene prioridad.
+      // Si el título ya apareció, lo adoptamos únicamente para los metadatos
+      // del documento. El filename siempre proviene del campo manual.
       adoptDetectedTitle();
-
-      if (activeState.manualFilename) {
-        activeState.manualFilename = normalizeFilename(activeState.manualFilename) || null;
-      }
-
-      const targetFilename = currentFilename();
 
       if (!activeState.createdAt) {
         activeState.createdAt = localIsoTimestamp();
@@ -2731,8 +2654,7 @@
 
       setPanelWidth(currentWidth, false);
     });
-
-    console.info('[ChatGPT Markdown Notes] v1.6.0 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.6.1 cargado');
   }
 
   bootstrap().catch(error => {
