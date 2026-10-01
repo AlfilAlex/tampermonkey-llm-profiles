@@ -1,6 +1,6 @@
 # Markdown Notes — Delta Specification
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Per-conversation note mode
 
