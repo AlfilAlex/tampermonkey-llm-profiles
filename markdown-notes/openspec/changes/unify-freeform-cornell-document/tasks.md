@@ -11,25 +11,25 @@
 
 ## Implementation
 
-- [ ] Add Cornell body serializer.
-- [ ] Add Cornell body parser.
-- [ ] Add migration logic for existing dual-content draft state.
-- [ ] Synchronize body after every Cornell content mutation.
-- [ ] Parse/synchronize body before entering Cornell or Repaso.
-- [ ] Make Libre render the same canonical body.
-- [ ] Simplify dirty state to canonical body plus filename.
-- [ ] Make filesystem save independent of selected view.
-- [ ] Mark Cornell frontmatter from canonical body structure.
-- [ ] Preserve Repaso as a read-only view of the same Cornell projection.
-- [ ] Bump userscript and README to v1.5.0.
+- [x] Add Cornell body serializer.
+- [x] Add Cornell body parser.
+- [x] Add migration logic for existing dual-content draft state.
+- [x] Synchronize body after every Cornell content mutation.
+- [x] Parse/synchronize body before entering Cornell or Repaso.
+- [x] Make Libre render the same canonical body.
+- [x] Simplify dirty state to canonical body plus filename.
+- [x] Make filesystem save independent of selected view.
+- [x] Mark Cornell frontmatter from canonical body structure.
+- [x] Preserve Repaso as a read-only view of the same Cornell projection.
+- [x] Bump userscript and README to v1.5.0.
 
 ## Validation
 
 - [ ] Run `node --check markdown-notes/chatgpt-markdown-notes.user.js`.
-- [ ] Parse the complete userscript successfully.
+- [x] Parse the complete userscript successfully with the V8 JavaScript parser.
 - [ ] Validate Cornell -> Libre shows the same content immediately.
 - [ ] Validate Libre edit -> Cornell rebuilds the expected blocks.
-- [ ] Validate arbitrary freeform Markdown enters Cornell without losing text.
+- [x] Validate arbitrary freeform Markdown enters Cornell without losing text using a parser/serializer round-trip check.
 - [ ] Validate a legacy body-only draft remains unchanged.
 - [ ] Validate a legacy Cornell-only draft migrates into body.
 - [ ] Validate a legacy draft containing both contents preserves both.
