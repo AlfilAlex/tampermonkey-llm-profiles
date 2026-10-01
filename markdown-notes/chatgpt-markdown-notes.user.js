@@ -2654,7 +2654,6 @@
 
       setPanelWidth(currentWidth, false);
     });
-
     console.info('[ChatGPT Markdown Notes] v1.6.1 cargado');
   }
 
