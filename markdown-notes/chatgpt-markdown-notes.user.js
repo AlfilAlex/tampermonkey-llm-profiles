@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.6.0
+// @version      1.6.1
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -613,8 +613,9 @@
     if (!activeState) return false;
 
     const contentChanged = activeState.body !== activeState.savedBody;
-    const filenameChanged = Boolean(activeState.filename) &&
-      currentFilename() !== activeState.filename;
+    const targetFilename = currentFilename();
+    const filenameChanged = Boolean(targetFilename) &&
+      targetFilename !== (activeState.filename || '');
 
     return contentChanged || filenameChanged;
   }
@@ -857,8 +858,11 @@
   }
 
   function currentFilename() {
-    const manual = normalizeFilename(activeState?.manualFilename);
-    return manual || automaticFilename();
+    return normalizeFilename(activeState?.manualFilename);
+  }
+
+  function hasManualFilename() {
+    return Boolean(currentFilename());
   }
 
   // ===========================================================================
@@ -1841,7 +1845,8 @@
             class="tmn-file-name"
             type="text"
             aria-label="Nombre del archivo Markdown"
-            title="Editable. Vacíalo para volver al nombre automático."
+            title="Obligatorio para guardar. La extensión .md se añade automáticamente."
+            placeholder="Nombre del archivo (obligatorio)"
             spellcheck="false"
           >
         </div>
@@ -2455,6 +2460,7 @@
     if (!panel || !activeState) return;
 
     const button = panel.querySelector('.tmn-save');
+    const canSave = hasManualFilename();
 
     if (activeState.filename || activeState.lastSavedAt) {
       button.textContent = 'Guardar cambios';
@@ -2462,7 +2468,10 @@
       button.textContent = 'Guardar nota';
     }
 
-    button.disabled = saving;
+    button.disabled = saving || !canSave;
+    button.title = canSave
+      ? ''
+      : 'Escribe un nombre de archivo antes de guardar.';
   }
 
   function setStatus(message, kind = '') {
@@ -2478,6 +2487,11 @@
 
     if (saving) {
       setStatus('Guardando cambios…');
+      return;
+    }
+
+    if (!hasManualFilename()) {
+      setStatus('Escribe un nombre de archivo para poder guardar.');
       return;
     }
 
@@ -2515,7 +2529,18 @@
   async function saveFile() {
     if (saving || !activeState) return;
 
+    const targetFilename = currentFilename();
+
+    if (!targetFilename) {
+      setStatus('Escribe un nombre de archivo antes de guardar.', 'error');
+      panel?.querySelector('.tmn-file-name')?.focus();
+      return;
+    }
+
+    activeState.manualFilename = targetFilename;
+
     saving = true;
+    renderHeader();
     renderSaveButton();
     updateStatus();
 
@@ -2536,12 +2561,6 @@
       // Si el título ya apareció, lo adoptamos para metadatos y para el nombre
       // automático. Un nombre manual siempre tiene prioridad.
       adoptDetectedTitle();
-
-      if (activeState.manualFilename) {
-        activeState.manualFilename = normalizeFilename(activeState.manualFilename) || null;
-      }
-
-      const targetFilename = currentFilename();
 
       if (!activeState.createdAt) {
         activeState.createdAt = localIsoTimestamp();
@@ -2732,7 +2751,7 @@
       setPanelWidth(currentWidth, false);
     });
 
-    console.info('[ChatGPT Markdown Notes] v1.6.0 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.6.1 cargado');
   }
 
   bootstrap().catch(error => {
