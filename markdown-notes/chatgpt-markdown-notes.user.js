@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.4.2
+// @version      1.5.0
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -299,38 +299,188 @@
     };
   }
 
-  function cornellSnapshot(value) {
+  function cornellHasContent(value) {
     const cornell = value && typeof value === 'object'
       ? value
       : { blocks: [], summary: '' };
 
-    return JSON.stringify({
-      blocks: Array.isArray(cornell.blocks)
-        ? cornell.blocks
-          .filter(block => String(block?.cue || '').trim() || String(block?.notes || '').trim())
-          .map(block => ({
-            id: String(block.id || ''),
-            cue: String(block.cue || ''),
-            notes: String(block.notes || '')
-          }))
-        : [],
-      summary: String(cornell.summary || '')
-    });
-  }
-
-  function activeOutputMode() {
-    return activeState?.noteMode === 'freeform' ? 'freeform' : 'cornell';
-  }
-
-  function hasCornellContent() {
-    if (!activeState?.cornell) return false;
-
     return Boolean(
-      activeState.cornell.summary.trim() ||
-      activeState.cornell.blocks.some(block =>
-        String(block.cue || '').trim() || String(block.notes || '').trim()
-      )
+      String(cornell.summary || '').trim() ||
+      (Array.isArray(cornell.blocks) && cornell.blocks.some(block =>
+        String(block?.cue || '').trim() || String(block?.notes || '').trim()
+      ))
     );
+  }
+
+  function serializeCornellBody(value) {
+    const cornell = normalizeCornellState(value);
+    const lines = ['## Cornell Notes', ''];
+
+    const blocks = cornell.blocks.filter(block =>
+      String(block.cue || '').trim() || String(block.notes || '').trim()
+    );
+
+    blocks.forEach((block, index) => {
+      const cue = String(block.cue || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const notes = String(block.notes || '').trim();
+      const heading = cue || 'Nota';
+
+      lines.push(`### ${index + 1}. ${heading}`, '');
+
+      if (notes) {
+        lines.push(notes, '');
+      }
+    });
+
+    lines.push('## Summary', '');
+
+    const summary = String(cornell.summary || '').trim();
+    if (summary) {
+      lines.push(summary, '');
+    }
+
+    return lines.join('\n').trimEnd();
+  }
+
+  function findCornellStructure(lines) {
+    let fenceChar = '';
+    let fenceLength = 0;
+    let startIndex = -1;
+    let summaryIndex = -1;
+    const blockIndexes = [];
+
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index];
+      const fence = line.match(/^\s*((?:[\x60]{3,})|(?:~{3,}))/);
+
+      if (fence) {
+        const token = fence[1];
+
+        if (!fenceChar) {
+          fenceChar = token[0];
+          fenceLength = token.length;
+        } else if (token[0] === fenceChar && token.length >= fenceLength) {
+          fenceChar = '';
+          fenceLength = 0;
+        }
+
+        continue;
+      }
+
+      if (fenceChar) continue;
+
+      const trimmed = line.trim();
+
+      if (startIndex < 0) {
+        if (trimmed === '## Cornell Notes') {
+          startIndex = index;
+        }
+        continue;
+      }
+
+      if (summaryIndex < 0 && trimmed === '## Summary') {
+        summaryIndex = index;
+        continue;
+      }
+
+      if (
+        summaryIndex < 0 &&
+        /^###\s+\d+\.\s+.+\s*$/.test(line)
+      ) {
+        blockIndexes.push(index);
+      }
+    }
+
+    return { startIndex, summaryIndex, blockIndexes };
+  }
+
+  function parseCornellBody(value) {
+    const body = String(value || '').replace(/\r\n?/g, '\n');
+    const lines = body.split('\n');
+    const { startIndex, summaryIndex, blockIndexes } = findCornellStructure(lines);
+
+    if (startIndex < 0 || summaryIndex <= startIndex) return null;
+
+    if (lines.slice(0, startIndex).some(line => line.trim())) return null;
+
+    const sectionLines = lines.slice(startIndex + 1, summaryIndex);
+    const sectionHasContent = sectionLines.some(line => line.trim());
+
+    if (sectionHasContent && blockIndexes.length === 0) return null;
+
+    const blocks = [];
+
+    for (let i = 0; i < blockIndexes.length; i += 1) {
+      const absoluteStart = blockIndexes[i];
+      const absoluteEnd = i + 1 < blockIndexes.length
+        ? blockIndexes[i + 1]
+        : summaryIndex;
+
+      const heading = lines[absoluteStart].match(/^###\s+\d+\.\s+(.+?)\s*$/);
+      if (!heading) return null;
+
+      const label = heading[1].trim();
+      const notes = lines
+        .slice(absoluteStart + 1, absoluteEnd)
+        .join('\n')
+        .trim();
+
+      blocks.push(createCornellBlock({
+        cue: label.toLowerCase() === 'nota' ? '' : label,
+        notes
+      }));
+    }
+
+    return {
+      blocks,
+      summary: lines.slice(summaryIndex + 1).join('\n').trim()
+    };
+  }
+
+  function isCornellBody(value) {
+    return parseCornellBody(value) !== null;
+  }
+
+  function importBodyAsCornell(value) {
+    const body = String(value || '').trim();
+
+    return {
+      blocks: body
+        ? [createCornellBlock({ cue: '', notes: body })]
+        : [],
+      summary: ''
+    };
+  }
+
+  function syncBodyFromCornell() {
+    if (!activeState?.cornell) return;
+
+    activeState.body = cornellHasContent(activeState.cornell)
+      ? serializeCornellBody(activeState.cornell)
+      : '';
+  }
+
+  function syncCornellFromBody({ canonicalize = true } = {}) {
+    if (!activeState) return false;
+
+    const parsed = parseCornellBody(activeState.body);
+
+    if (parsed) {
+      activeState.cornell = normalizeCornellState(parsed);
+      return true;
+    }
+
+    activeState.cornell = normalizeCornellState(
+      importBodyAsCornell(activeState.body)
+    );
+
+    if (canonicalize) {
+      syncBodyFromCornell();
+    }
+
+    return false;
   }
 
   function createEmptyState() {
@@ -361,17 +511,46 @@
       ? value.noteTitle.trim()
       : null;
 
-    // v1.2.0 podía persistir el fallback "Nota de ChatGPT" como si fuera el
-    // título real. Lo tratamos como no resuelto para que pueda autocorregirse
-    // cuando ChatGPT exponga el título verdadero.
     const noteTitle = storedTitle &&
       !isFallbackNoteTitle(storedTitle) &&
       !isGenericTitle(storedTitle)
       ? storedTitle
       : null;
 
+    const noteMode = ['freeform', 'cornell', 'review'].includes(value.noteMode)
+      ? value.noteMode
+      : 'freeform';
+
+    let body = typeof value.body === 'string' ? value.body : '';
+    let cornell = normalizeCornellState(value.cornell);
+    const parsedBody = parseCornellBody(body);
+
+    if (parsedBody) {
+      // El Markdown canónico gana sobre cualquier proyección Cornell cacheada.
+      cornell = normalizeCornellState(parsedBody);
+    } else if (cornellHasContent(cornell)) {
+      if (body.trim()) {
+        // Migración desde v1.4.x: Libre y Cornell podían contener documentos
+        // distintos. Preservamos ambos en un único documento Cornell.
+        cornell = normalizeCornellState({
+          blocks: [
+            createCornellBlock({ cue: '', notes: body }),
+            ...cornell.blocks
+          ],
+          summary: cornell.summary
+        });
+      }
+
+      body = serializeCornellBody(cornell);
+    } else if (noteMode !== 'freeform' && body.trim()) {
+      // Un draft que estaba visualmente en Cornell/Repaso pero sólo conserva
+      // body se importa sin pérdida como un único bloque.
+      cornell = normalizeCornellState(importBodyAsCornell(body));
+      body = serializeCornellBody(cornell);
+    }
+
     return {
-      body: typeof value.body === 'string' ? value.body : '',
+      body,
       savedBody: typeof value.savedBody === 'string' ? value.savedBody : '',
       noteTitle,
       manualFilename: typeof value.manualFilename === 'string' && value.manualFilename.trim()
@@ -387,13 +566,11 @@
       filenameFallbackAt: typeof value.filenameFallbackAt === 'string' && value.filenameFallbackAt
         ? value.filenameFallbackAt
         : null,
-      noteMode: ['freeform', 'cornell', 'review'].includes(value.noteMode)
-        ? value.noteMode
-        : 'freeform',
+      noteMode,
       savedNoteMode: ['freeform', 'cornell'].includes(value.savedNoteMode)
         ? value.savedNoteMode
-        : (typeof value.lastSavedAt === 'string' && value.lastSavedAt ? 'freeform' : null),
-      cornell: normalizeCornellState(value.cornell),
+        : null,
+      cornell,
       savedCornellSnapshot: typeof value.savedCornellSnapshot === 'string'
         ? value.savedCornellSnapshot
         : null,
@@ -433,20 +610,11 @@
   function isDirty() {
     if (!activeState) return false;
 
-    const outputMode = activeOutputMode();
-    const contentChanged = outputMode === 'freeform'
-      ? activeState.body !== activeState.savedBody
-      : cornellSnapshot(activeState.cornell) !==
-        (activeState.savedCornellSnapshot || cornellSnapshot(null));
-
-    const modeChanged = Boolean(activeState.lastSavedAt) &&
-      Boolean(activeState.savedNoteMode) &&
-      outputMode !== activeState.savedNoteMode;
-
+    const contentChanged = activeState.body !== activeState.savedBody;
     const filenameChanged = Boolean(activeState.filename) &&
       currentFilename() !== activeState.filename;
 
-    return contentChanged || modeChanged || filenameChanged;
+    return contentChanged || filenameChanged;
   }
 
   function ensureCornellStarterBlock() {
@@ -461,6 +629,14 @@
   function setNoteMode(mode) {
     if (!activeState || !['freeform', 'cornell', 'review'].includes(mode)) return;
     if (activeState.noteMode === mode) return;
+
+    if (activeState.noteMode === 'cornell') {
+      syncBodyFromCornell();
+    }
+
+    if (mode === 'cornell' || mode === 'review') {
+      syncCornellFromBody({ canonicalize: true });
+    }
 
     if (mode === 'cornell') {
       ensureCornellStarterBlock();
@@ -482,6 +658,7 @@
 
     const block = createCornellBlock();
     activeState.cornell.blocks.push(block);
+    syncBodyFromCornell();
     renderCornellEditor();
     renderSaveButton();
     updateStatus();
@@ -505,6 +682,7 @@
 
     const [block] = blocks.splice(index, 1);
     blocks.splice(nextIndex, 0, block);
+    syncBodyFromCornell();
 
     renderCornellEditor();
     renderSaveButton();
@@ -535,6 +713,7 @@
     }
 
     activeState.cornell.blocks.splice(index, 1);
+    syncBodyFromCornell();
     renderCornellEditor();
     renderSaveButton();
     updateStatus();
@@ -820,7 +999,7 @@
     const title = currentNoteTitle();
     const chatId = getChatId();
     const chatUrl = getChatUrl();
-    const outputMode = activeOutputMode();
+    const body = String(activeState.body || '').trim();
 
     const created = activeState.createdAt || localIsoTimestamp();
     const updated = localIsoTimestamp();
@@ -833,7 +1012,7 @@
       `source: ${yamlString('ChatGPT')}`
     ];
 
-    if (outputMode === 'cornell') {
+    if (isCornellBody(body)) {
       lines.push(`note_method: ${yamlString('cornell')}`);
     }
 
@@ -846,41 +1025,8 @@
       ''
     );
 
-    if (outputMode === 'freeform') {
-      const body = String(activeState.body || '').trim();
-
-      if (body) {
-        lines.push(body, '');
-      }
-
-      return lines.join('\n');
-    }
-
-    lines.push('## Cornell Notes', '');
-
-    const blocks = activeState.cornell.blocks.filter(block =>
-      String(block.cue || '').trim() || String(block.notes || '').trim()
-    );
-
-    blocks.forEach((block, index) => {
-      const cue = String(block.cue || '')
-        .replace(/\s+/g, ' ')
-        .trim();
-      const notes = String(block.notes || '').trim();
-      const heading = cue || 'Nota';
-
-      lines.push(`### ${index + 1}. ${heading}`, '');
-
-      if (notes) {
-        lines.push(notes, '');
-      }
-    });
-
-    lines.push('## Summary', '');
-
-    const summary = String(activeState.cornell.summary || '').trim();
-    if (summary) {
-      lines.push(summary, '');
+    if (body) {
+      lines.push(body, '');
     }
 
     return lines.join('\n');
@@ -1512,6 +1658,7 @@
       if (!block || !['cue', 'notes'].includes(field)) return;
 
       block[field] = event.target.value;
+      syncBodyFromCornell();
       renderSaveButton();
       updateStatus();
       scheduleDraftPersistence();
@@ -1535,6 +1682,7 @@
       if (!activeState?.cornell) return;
 
       activeState.cornell.summary = event.target.value;
+      syncBodyFromCornell();
       renderSaveButton();
       updateStatus();
       scheduleDraftPersistence();
@@ -1586,6 +1734,11 @@
       if (!activeState) return;
 
       activeState.body = event.target.value;
+
+      // body es la fuente canónica. Cualquier proyección Cornell previa queda
+      // obsoleta hasta que el Markdown vuelva a parsearse al entrar a Cornell.
+      activeState.cornell = normalizeCornellState(null);
+
       renderSaveButton();
       updateStatus();
       scheduleDraftPersistence();
@@ -1979,7 +2132,7 @@
       return;
     }
 
-    if (activeState.body || hasCornellContent()) {
+    if (activeState.body) {
       setStatus('Borrador persistido localmente');
       return;
     }
@@ -2045,19 +2198,9 @@
       );
 
       // Sólo después de una escritura exitosa registramos el nombre del archivo
-      // que realmente existe en disco y el snapshot correspondiente al modo
-      // que produjo el archivo.
+      // y el cuerpo canónico que realmente se escribió.
       activeState.filename = targetFilename;
-
-      const outputMode = activeOutputMode();
-      activeState.savedNoteMode = outputMode;
-
-      if (outputMode === 'freeform') {
-        activeState.savedBody = activeState.body;
-      } else {
-        activeState.savedCornellSnapshot = cornellSnapshot(activeState.cornell);
-      }
-
+      activeState.savedBody = activeState.body;
       activeState.lastSavedAt = localIsoTimestamp();
 
       await persistActiveState();
@@ -2206,7 +2349,7 @@
       setPanelWidth(currentWidth, false);
     });
 
-    console.info('[ChatGPT Markdown Notes] v1.4.2 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.5.0 cargado');
   }
 
   bootstrap().catch(error => {
