@@ -1,0 +1,51 @@
+name: OpenSpec - Markdown Notes
+
+on:
+  push:
+    paths:
+      - "markdown-notes/**"
+      - ".github/workflows/openspec-markdown-notes.yml"
+  pull_request:
+    paths:
+      - "markdown-notes/**"
+      - ".github/workflows/openspec-markdown-notes.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: markdown-notes
+    env:
+      CI: "true"
+      OPENSPEC_TELEMETRY: "0"
+      OPENSPEC_NO_UPDATE_CHECK: "1"
+      NO_COLOR: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install OpenSpec CLI
+        run: npm install -g @fission-ai/openspec@latest
+
+      - name: Show OpenSpec version
+        run: openspec --version
+
+      - name: Resolve OpenSpec project
+        run: openspec list --json
+
+      - name: Validate active changes and specs
+        run: openspec validate --all --strict --json
+
+      - name: Audit archived task completion
+        continue-on-error: true
+        run: openspec validate --archived
