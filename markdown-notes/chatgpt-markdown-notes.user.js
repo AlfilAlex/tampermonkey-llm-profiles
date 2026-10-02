@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.7.0
+// @version      1.8.0
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -43,6 +43,9 @@
   let reviewRevealed = false;
 
   let markdownSelection = null;
+
+  let freeformView = 'live';
+  let liveActiveBlock = null;
 
   // ===========================================================================
   // IndexedDB
