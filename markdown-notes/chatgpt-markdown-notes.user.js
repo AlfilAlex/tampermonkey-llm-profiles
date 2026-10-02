@@ -217,14 +217,14 @@
       String(block.cue || '').trim() || String(block.notes || '').trim()
     );
 
-    blocks.forEach((block, index) => {
+    blocks.forEach(block => {
       const cue = String(block.cue || '')
         .replace(/\s+/g, ' ')
         .trim();
       const notes = String(block.notes || '').trim();
       const heading = cue || 'Nota';
 
-      lines.push(`### ${index + 1}. ${heading}`, '');
+      lines.push(`### Cue: ${heading}`, '');
 
       if (notes) {
         lines.push(notes, '');
@@ -245,8 +245,9 @@
     let fenceChar = '';
     let fenceLength = 0;
     let startIndex = -1;
-    let summaryIndex = -1;
-    const blockIndexes = [];
+    const summaryIndexes = [];
+    const semanticBlockIndexes = [];
+    const legacyBlockIndexes = [];
 
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index];
@@ -277,26 +278,49 @@
         continue;
       }
 
-      if (summaryIndex < 0 && trimmed === '## Summary') {
-        summaryIndex = index;
+      if (trimmed === '## Summary') {
+        summaryIndexes.push(index);
         continue;
       }
 
-      if (
-        summaryIndex < 0 &&
-        /^###\s+\d+\.\s+.+\s*$/.test(line)
-      ) {
-        blockIndexes.push(index);
+      if (/^###\s+Cue:\s*.+\s*$/i.test(line)) {
+        semanticBlockIndexes.push(index);
+        continue;
+      }
+
+      if (/^###\s+\d+\.\s+.+\s*$/.test(line)) {
+        legacyBlockIndexes.push(index);
       }
     }
 
-    return { startIndex, summaryIndex, blockIndexes };
+    const summaryIndex = summaryIndexes.length > 0
+      ? summaryIndexes[summaryIndexes.length - 1]
+      : -1;
+
+    const semantic = semanticBlockIndexes.filter(index =>
+      index > startIndex && (summaryIndex < 0 || index < summaryIndex)
+    );
+    const legacy = legacyBlockIndexes.filter(index =>
+      index > startIndex && (summaryIndex < 0 || index < summaryIndex)
+    );
+
+    return {
+      startIndex,
+      summaryIndex,
+      format: semantic.length > 0 ? 'semantic' : 'legacy',
+      blockIndexes: semantic.length > 0 ? semantic : legacy
+    };
   }
 
   function parseCornellBody(value) {
     const body = String(value || '').replace(/\r\n?/g, '\n');
     const lines = body.split('\n');
-    const { startIndex, summaryIndex, blockIndexes } = findCornellStructure(lines);
+    const {
+      startIndex,
+      summaryIndex,
+      format,
+      blockIndexes
+    } = findCornellStructure(lines);
 
     if (startIndex < 0 || summaryIndex <= startIndex) return null;
 
@@ -315,7 +339,10 @@
         ? blockIndexes[i + 1]
         : summaryIndex;
 
-      const heading = lines[absoluteStart].match(/^###\s+\d+\.\s+(.+?)\s*$/);
+      const heading = format === 'semantic'
+        ? lines[absoluteStart].match(/^###\s+Cue:\s*(.+?)\s*$/i)
+        : lines[absoluteStart].match(/^###\s+\d+\.\s+(.+?)\s*$/);
+
       if (!heading) return null;
 
       const label = heading[1].trim();
