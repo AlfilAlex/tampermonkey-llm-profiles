@@ -743,6 +743,9 @@
       }
     }
 
+    liveActiveBlock = null;
+    markdownSelection = null;
+
     if (activeState.noteMode === 'cornell') {
       syncBodyFromCornell();
     }
@@ -2959,7 +2962,20 @@
       setNoteMode(button.dataset.mode);
     });
 
+    panel.querySelector('.tmn-freeform-view-switch').addEventListener('click', event => {
+      const button = event.target instanceof Element
+        ? event.target.closest('button[data-freeform-view]')
+        : null;
+
+      if (!button) return;
+      setFreeformView(button.dataset.freeformView);
+    });
+
     const markdownToolbar = panel.querySelector('.tmn-markdown-toolbar');
+
+    for (const button of markdownToolbar.querySelectorAll('button[data-md-action]')) {
+      button.dataset.defaultTitle = button.title;
+    }
 
     markdownToolbar.addEventListener('pointerdown', event => {
       const button = event.target instanceof Element
@@ -3216,7 +3232,13 @@
     if (!panel || !activeState) return;
 
     if (activeState.noteMode === 'freeform') {
-      panel.querySelector('.tmn-editor')?.focus();
+      if (freeformView === 'live') {
+        panel.querySelector(
+          '.tmn-live-block-editor, .tmn-live-block, .tmn-live-empty'
+        )?.focus();
+      } else {
+        panel.querySelector('.tmn-editor')?.focus();
+      }
       return;
     }
 
@@ -3426,31 +3448,43 @@
   function renderEditor() {
     if (!panel || !activeState) return;
 
-    renderMarkdownToolbar();
+    renderFreeformViewSwitch();
     renderCornellStructureAssistant();
 
     const editor = panel.querySelector('.tmn-editor');
+    const livePreview = panel.querySelector('.tmn-live-preview');
     const cornell = panel.querySelector('.tmn-cornell-editor');
     const review = panel.querySelector('.tmn-review');
 
     const mode = activeState.noteMode;
-    editor.hidden = mode !== 'freeform';
+    const isFreeform = mode === 'freeform';
+
+    editor.hidden = !isFreeform || freeformView !== 'source';
+    livePreview.hidden = !isFreeform || freeformView !== 'live';
     cornell.hidden = mode !== 'cornell';
     review.hidden = mode !== 'review';
 
-    if (mode === 'freeform') {
-      if (editor.value !== activeState.body) {
-        editor.value = activeState.body;
+    if (isFreeform) {
+      if (freeformView === 'source') {
+        if (editor.value !== activeState.body) {
+          editor.value = activeState.body;
+        }
+      } else {
+        renderLivePreview();
       }
+
+      renderMarkdownToolbar();
       return;
     }
 
     if (mode === 'cornell') {
       renderCornellEditor();
+      renderMarkdownToolbar();
       return;
     }
 
     renderReview();
+    renderMarkdownToolbar();
   }
 
   function renderSaveButton() {
@@ -3631,6 +3665,8 @@
 
     activeChatKey = chatKey;
     activeState = await loadState(chatKey);
+    liveActiveBlock = null;
+    markdownSelection = null;
 
     renderAll();
   }
