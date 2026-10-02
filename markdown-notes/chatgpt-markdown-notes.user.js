@@ -1299,6 +1299,46 @@
     toolbar.hidden = activeState.noteMode === 'review';
   }
 
+  function renderCornellStructureAssistant({ emphasize = false } = {}) {
+    if (!panel || !activeState) return;
+
+    const assistant = panel.querySelector('.tmn-cornell-assist');
+    if (!assistant) return;
+
+    const visible = activeState.noteMode === 'freeform';
+    assistant.hidden = !visible;
+
+    if (!visible) {
+      assistant.classList.remove('tmn-attention');
+      return;
+    }
+
+    const status = assistant.querySelector('.tmn-cornell-assist-status');
+    const prepare = assistant.querySelector('[data-cornell-assist-action="prepare"]');
+    const analysis = analyzeCornellCompatibility(activeState.body);
+
+    assistant.dataset.state = analysis.state;
+
+    if (analysis.state === 'ready') {
+      status.textContent = `Cornell listo · ${analysis.blocks} ${analysis.blocks === 1 ? 'bloque' : 'bloques'}`;
+      prepare.hidden = true;
+    } else if (analysis.state === 'empty') {
+      status.textContent = 'Libre vacío';
+      prepare.hidden = false;
+    } else {
+      status.textContent = 'Libre · sin estructura Cornell';
+      prepare.hidden = false;
+    }
+
+    if (emphasize) {
+      assistant.classList.add('tmn-attention');
+
+      window.setTimeout(() => {
+        assistant.classList.remove('tmn-attention');
+      }, 1600);
+    }
+  }
+
   // ===========================================================================
   // UI
   // ===========================================================================
@@ -1515,6 +1555,76 @@
 
       #${APP}-panel .tmn-markdown-toolbar .tmn-md-wide {
         min-width: 44px;
+      }
+
+      #${APP}-panel .tmn-cornell-assist {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 7px 10px;
+        border-bottom: 1px solid rgba(127,127,127,.18);
+        background: rgba(0,0,0,.035);
+        transition: box-shadow .16s ease, background .16s ease;
+      }
+
+      #${APP}-panel .tmn-cornell-assist[hidden] {
+        display: none !important;
+      }
+
+      #${APP}-panel .tmn-cornell-assist.tmn-attention {
+        background: rgba(255,255,255,.075);
+        box-shadow: inset 0 0 0 1px rgba(220,220,220,.28);
+      }
+
+      #${APP}-panel .tmn-cornell-assist-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 5px;
+      }
+
+      #${APP}-panel .tmn-cornell-assist-status {
+        flex: 1 1 145px;
+        min-width: 0;
+        font-size: 11px;
+        font-weight: 700;
+        opacity: .82;
+      }
+
+      #${APP}-panel .tmn-cornell-assist-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+
+      #${APP}-panel .tmn-cornell-assist button {
+        min-height: 27px;
+        padding: 0 7px;
+        border-radius: 7px;
+        font-size: 10.5px;
+      }
+
+      #${APP}-panel .tmn-cornell-assist details {
+        width: 100%;
+        font-size: 10.5px;
+        line-height: 1.45;
+        opacity: .76;
+      }
+
+      #${APP}-panel .tmn-cornell-assist summary {
+        cursor: pointer;
+        user-select: none;
+      }
+
+      #${APP}-panel .tmn-cornell-assist-help {
+        margin-top: 5px;
+        padding: 7px 8px;
+        border-radius: 7px;
+        background: rgba(0,0,0,.12);
+      }
+
+      #${APP}-panel .tmn-cornell-assist-help strong {
+        opacity: .95;
       }
 
       #${APP}-panel .tmn-editor-wrap {
@@ -1840,8 +1950,8 @@
       <div class="tmn-markdown-toolbar" role="toolbar" aria-label="Formato Markdown">
         <button type="button" data-md-action="bold" aria-label="Negrita" title="Negrita (Ctrl/Cmd+B)"><strong>B</strong></button>
         <button type="button" data-md-action="italic" aria-label="Cursiva" title="Cursiva (Ctrl/Cmd+I)"><em>I</em></button>
-        <button type="button" data-md-action="h2" aria-label="Encabezado nivel 2" title="Encabezado H2">H2</button>
-        <button type="button" data-md-action="h3" aria-label="Encabezado nivel 3" title="Encabezado H3">H3</button>
+        <button type="button" class="tmn-md-wide" data-md-action="h2" aria-label="Sección Markdown nivel 2" title="Sección Markdown (H2) · formato libre, no necesario para Cornell">Sección</button>
+        <button type="button" class="tmn-md-wide" data-md-action="h3" aria-label="Subsección Markdown nivel 3" title="Subsección Markdown (H3) · formato libre, no necesario para Cornell">Subsec.</button>
         <button type="button" data-md-action="bullet" aria-label="Lista con viñetas" title="Lista con viñetas">•</button>
         <button type="button" data-md-action="ordered" aria-label="Lista numerada" title="Lista numerada">1.</button>
         <button type="button" data-md-action="task" aria-label="Lista de tareas" title="Lista de tareas">☐</button>
@@ -1849,6 +1959,27 @@
         <button type="button" data-md-action="inlineCode" aria-label="Código inline" title="Código inline">&lt;/&gt;</button>
         <button type="button" class="tmn-md-wide" data-md-action="codeBlock" aria-label="Bloque de código" title="Bloque de código">Code</button>
         <button type="button" class="tmn-md-wide" data-md-action="link" aria-label="Enlace" title="Enlace (Ctrl/Cmd+K)">Link</button>
+      </div>
+
+      <div class="tmn-cornell-assist" aria-label="Estructura Cornell" hidden>
+        <div class="tmn-cornell-assist-row">
+          <div class="tmn-cornell-assist-status">Libre vacío</div>
+          <div class="tmn-cornell-assist-actions">
+            <button type="button" data-cornell-assist-action="prepare">Preparar Cornell</button>
+            <button type="button" data-cornell-assist-action="cue">+ Cue / Pregunta</button>
+            <button type="button" data-cornell-assist-action="summary">Ir a resumen</button>
+          </div>
+        </div>
+        <details>
+          <summary>¿Cómo se relaciona Libre con Cornell?</summary>
+          <div class="tmn-cornell-assist-help">
+            <div><strong>Título / archivo:</strong> lo defines arriba; no necesitas escribir H1 en la nota.</div>
+            <div><strong>Cue / Pregunta:</strong> crea un bloque Cornell.</div>
+            <div><strong>Texto debajo:</strong> son las notas de ese cue.</div>
+            <div><strong>Resumen:</strong> es la síntesis final de la nota.</div>
+            <div><strong>Sección / Subsec.:</strong> son H2/H3 Markdown normales. No necesitas usarlos para convertir a Cornell.</div>
+          </div>
+        </details>
       </div>
 
       <div class="tmn-editor-wrap">
@@ -1965,6 +2096,20 @@
       applyMarkdownAction(button.dataset.mdAction);
     });
 
+    panel.querySelector('.tmn-cornell-assist').addEventListener('click', event => {
+      const button = event.target instanceof Element
+        ? event.target.closest('button[data-cornell-assist-action]')
+        : null;
+
+      if (!button) return;
+
+      const action = button.dataset.cornellAssistAction;
+
+      if (action === 'prepare') prepareCornellFromLibre();
+      else if (action === 'cue') addCornellCueFromLibre();
+      else if (action === 'summary') goToCornellSummaryFromLibre();
+    });
+
     const rememberSelectionFromEvent = event => {
       if (isMarkdownTextarea(event.target)) {
         rememberMarkdownSelection(event.target);
@@ -2070,6 +2215,7 @@
       // obsoleta hasta que el Markdown vuelva a parsearse al entrar a Cornell.
       activeState.cornell = normalizeCornellState(null);
 
+      renderCornellStructureAssistant();
       renderSaveButton();
       updateStatus();
       scheduleDraftPersistence();
@@ -2395,6 +2541,7 @@
     if (!panel || !activeState) return;
 
     renderMarkdownToolbar();
+    renderCornellStructureAssistant();
 
     const editor = panel.querySelector('.tmn-editor');
     const cornell = panel.querySelector('.tmn-cornell-editor');
