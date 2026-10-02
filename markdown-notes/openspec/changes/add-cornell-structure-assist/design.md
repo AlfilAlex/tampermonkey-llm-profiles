@@ -4,12 +4,12 @@
 
 The implementation already has one canonical `body`, but Libre exposes raw Markdown while Cornell exposes semantic fields.
 
-The generated Cornell body is currently:
+The legacy generated Cornell body used numbered level-3 headings. This change moves new serialization to semantic cue headings:
 
 ```markdown
 ## Cornell Notes
 
-### 1. Cue
+### Cue: Cue
 
 Notes...
 
@@ -104,7 +104,7 @@ The semantic action operates on canonical Cornell state rather than manipulating
    ```js
    { cue: "Pregunta o concepto", notes: "" }
    ```
-4. Serialize back to body.
+4. Serialize back to body using `### Cue: Pregunta o concepto`.
 5. Render Libre.
 6. Locate the generated cue text in the textarea and select `Pregunta o concepto`.
 
@@ -194,3 +194,29 @@ The browser draft and filesystem save remain separate.
 - Parsing failure after a semantic action aborts and shows an error status.
 - No filesystem writes happen as part of preparation.
 - Saving remains controlled by the existing manual-name and directory permission flow.
+
+
+## Canonical Cue Syntax
+
+New Cornell serialization uses:
+
+```markdown
+### Cue: <question or concept>
+```
+
+instead of numbered `### N. ...` headings.
+
+Reasons:
+
+- the raw Libre representation communicates semantic intent directly;
+- generic H2/H3 formatting no longer looks like undocumented Cornell structure;
+- ordinary numbered H3 headings inside notes are less likely to be mistaken for Cornell blocks;
+- block numbering remains a presentation concern rather than persisted meaning.
+
+The parser remains backward compatible:
+
+1. if semantic `### Cue:` headings exist, they define block boundaries;
+2. otherwise legacy numbered `### N. ...` headings are parsed;
+3. serialization always writes the semantic form.
+
+For Summary detection, use the last top-level `## Summary` outside fenced code. This allows an earlier Summary heading inside imported freeform content to remain part of the notes.
