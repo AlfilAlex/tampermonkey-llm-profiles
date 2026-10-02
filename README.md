@@ -32,7 +32,7 @@ No existe un OpenSpec compartido en la raíz: compartir repositorio no implica c
 - Mantiene ON/OFF y perfil seleccionado por conversación.
 
 
-### ChatGPT Markdown Notes v1.7.0
+### ChatGPT Markdown Notes v1.8.1
 
 
 - Panel lateral de notas Markdown persistente por conversación.
