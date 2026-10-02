@@ -98,3 +98,15 @@ None.
 ## Version
 
 Markdown Notes becomes v1.7.0 because this changes the editing workflow and mode-transition UX.
+
+
+## Cornell Block Action Refinements
+
+- Add a compact `+` action beside the existing move-up, move-down, and delete controls in every Cornell block header.
+- The compact `+` inserts a new blank block immediately after the current block and focuses its Cue / Question field.
+- Keep the existing bottom `+ Añadir bloque` action as the append-at-end affordance.
+- Replace one-click deletion with an inline two-step confirmation:
+  - first click arms the delete button and changes its label to `Confirmar`;
+  - second click within a short timeout deletes the block;
+  - if confirmation expires, the button returns to `Eliminar`.
+- Apply the same delete friction to empty and non-empty blocks so accidental removal is consistently prevented.
