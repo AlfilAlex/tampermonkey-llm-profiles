@@ -470,7 +470,36 @@
   }
 
   function selectTextInFreeformEditor(text, fromEnd = false) {
-    const editor = panel?.querySelector('.tmn-editor');
+    if (!panel || !activeState) return false;
+
+    if (freeformView === 'live') {
+      const blocks = parseMarkdownPreviewBlocks(activeState.body)
+        .filter(block => block.raw.includes(text));
+      const block = fromEnd ? blocks[blocks.length - 1] : blocks[0];
+
+      if (!block) return false;
+
+      activateLivePreviewBlock(block.start, block.end);
+
+      requestAnimationFrame(() => {
+        const editor = panel?.querySelector('.tmn-live-block-editor');
+        if (!editor) return;
+
+        const index = fromEnd
+          ? editor.value.lastIndexOf(text)
+          : editor.value.indexOf(text);
+
+        if (index < 0) return;
+
+        editor.focus();
+        editor.setSelectionRange(index, index + text.length);
+        rememberMarkdownSelection(editor);
+      });
+
+      return true;
+    }
+
+    const editor = panel.querySelector('.tmn-editor');
     if (!editor) return false;
 
     const value = editor.value;
@@ -491,6 +520,11 @@
     persistSemanticCornellEdit();
 
     requestAnimationFrame(() => {
+      if (freeformView === 'live') {
+        panel?.querySelector('.tmn-live-block, .tmn-live-empty')?.focus();
+        return;
+      }
+
       const editor = panel?.querySelector('.tmn-editor');
       editor?.focus();
 
@@ -547,7 +581,7 @@
     activeState.body = serializeCornellBody(activeState.cornell);
     persistSemanticCornellEdit();
 
-    requestAnimationFrame(() => {
+    const focusSummaryInSource = () => {
       const editor = panel?.querySelector('.tmn-editor');
       if (!editor) return;
 
@@ -566,7 +600,14 @@
       editor.focus();
       editor.setSelectionRange(caret, caret);
       rememberMarkdownSelection(editor);
-    });
+    };
+
+    if (freeformView === 'live') {
+      setFreeformView('source');
+      requestAnimationFrame(focusSummaryInSource);
+    } else {
+      requestAnimationFrame(focusSummaryInSource);
+    }
   }
 
   function createNoteId() {
@@ -3716,12 +3757,12 @@
     const isSave = modifier && key === 's';
     if (!isSave) return;
 
-    const editor = panel.querySelector('.tmn-editor');
     const filenameInput = panel.querySelector('.tmn-file-name');
     const insideCornellEditor = event.target instanceof Element &&
       Boolean(event.target.closest('.tmn-cornell-editor'));
+    const insideMarkdownEditor = isMarkdownTextarea(event.target);
 
-    if (event.target !== editor && event.target !== filenameInput && !insideCornellEditor) return;
+    if (!insideMarkdownEditor && event.target !== filenameInput && !insideCornellEditor) return;
 
     event.preventDefault();
     event.stopPropagation();
