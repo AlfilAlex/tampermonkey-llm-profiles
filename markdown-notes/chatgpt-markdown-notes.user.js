@@ -1694,6 +1694,7 @@
   function isMarkdownTextarea(target) {
     return target instanceof HTMLTextAreaElement && (
       target.classList.contains('tmn-editor') ||
+      target.classList.contains('tmn-live-block-editor') ||
       target.classList.contains('tmn-block-notes') ||
       target.classList.contains('tmn-summary-editor')
     );
@@ -1713,7 +1714,9 @@
     if (!panel || !activeState || activeState.noteMode === 'review') return null;
 
     if (activeState.noteMode === 'freeform') {
-      return panel.querySelector('.tmn-editor');
+      return freeformView === 'live'
+        ? panel.querySelector('.tmn-live-block-editor')
+        : panel.querySelector('.tmn-editor');
     }
 
     return panel.querySelector('.tmn-block-notes') ||
@@ -1724,7 +1727,9 @@
     if (!isMarkdownTextarea(target) || !activeState) return false;
 
     if (activeState.noteMode === 'freeform') {
-      return target.classList.contains('tmn-editor');
+      return freeformView === 'live'
+        ? target.classList.contains('tmn-live-block-editor')
+        : target.classList.contains('tmn-editor');
     }
 
     if (activeState.noteMode === 'cornell') {
@@ -1968,6 +1973,18 @@
     if (!toolbar) return;
 
     toolbar.hidden = activeState.noteMode === 'review';
+
+    const liveWithoutEditor =
+      activeState.noteMode === 'freeform' &&
+      freeformView === 'live' &&
+      !panel.querySelector('.tmn-live-block-editor');
+
+    for (const button of toolbar.querySelectorAll('button[data-md-action]')) {
+      button.disabled = liveWithoutEditor;
+      button.title = liveWithoutEditor
+        ? 'Selecciona un bloque en Vista viva para darle formato.'
+        : button.dataset.defaultTitle || button.title;
+    }
   }
 
   function renderCornellStructureAssistant({ emphasize = false } = {}) {
