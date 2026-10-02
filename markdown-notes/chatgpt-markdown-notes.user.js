@@ -129,7 +129,7 @@
   }
 
   // ===========================================================================
-  // Conversación y título
+  // Conversación
   // ===========================================================================
 
   function getChatId() {
@@ -482,7 +482,16 @@
   }
 
   async function loadState(chatKey) {
-    return normalizeState(await idbGet(DRAFT_STORE, chatKey));
+    const stored = await idbGet(DRAFT_STORE, chatKey);
+    const state = normalizeState(stored);
+
+    // noteId es identidad interna y debe permanecer estable incluso antes del
+    // primer guardado al filesystem.
+    if (!stored?.noteId) {
+      await idbSet(DRAFT_STORE, chatKey, state);
+    }
+
+    return state;
   }
 
   async function persistActiveState() {
@@ -793,6 +802,11 @@
 
   function buildMarkdown() {
     const title = currentNoteTitle();
+
+    if (!title) {
+      throw new Error('Escribe un título / nombre de archivo antes de guardar.');
+    }
+
     const chatId = getChatId();
     const chatUrl = getChatUrl();
     const body = String(activeState.body || '').trim();
@@ -1229,14 +1243,6 @@
       #${APP}-panel .tmn-heading {
         min-width: 0;
         flex: 1;
-      }
-
-      #${APP}-panel .tmn-chat-title {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font-size: 14px;
-        font-weight: 700;
       }
 
       #${APP}-panel .tmn-file-name {
@@ -2246,7 +2252,9 @@
     const button = panel.querySelector('.tmn-save');
     const canSave = hasManualFilename();
 
-    if (activeState.filename || activeState.lastSavedAt) {
+    if (!canSave) {
+      button.textContent = 'Guardar nota';
+    } else if (activeState.filename || activeState.lastSavedAt) {
       button.textContent = 'Guardar cambios';
     } else {
       button.textContent = 'Guardar nota';
