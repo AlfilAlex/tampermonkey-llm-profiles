@@ -28,6 +28,14 @@
 - [x] Preserve existing draft persistence and filesystem save behavior.
 - [x] Update README and userscript version to v1.7.0.
 
+- [ ] Add compact block-local add action beside move/delete controls.
+- [ ] Insert new block immediately after the selected block.
+- [ ] Focus the inserted block's Cue field.
+- [ ] Replace one-click delete/native confirm with inline two-step confirmation.
+- [ ] Apply delete confirmation consistently to empty and populated blocks.
+- [ ] Add accessible labels/titles for local add and armed delete states.
+- [ ] Preserve the existing append-at-end block button.
+
 ## Validation
 
 - [ ] Run `node --check markdown-notes/chatgpt-markdown-notes.user.js`.
