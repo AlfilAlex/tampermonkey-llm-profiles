@@ -28,15 +28,18 @@
 - [x] Preserve existing draft persistence and filesystem save behavior.
 - [x] Update README and userscript version to v1.7.0.
 
-- [ ] Add compact block-local add action beside move/delete controls.
-- [ ] Insert new block immediately after the selected block.
-- [ ] Focus the inserted block's Cue field.
-- [ ] Replace one-click delete/native confirm with inline two-step confirmation.
-- [ ] Apply delete confirmation consistently to empty and populated blocks.
-- [ ] Add accessible labels/titles for local add and armed delete states.
-- [ ] Preserve the existing append-at-end block button.
+- [x] Add compact block-local add action beside move/delete controls.
+- [x] Insert new block immediately after the selected block.
+- [x] Focus the inserted block's Cue field.
+- [x] Replace one-click delete/native confirm with inline two-step confirmation.
+- [x] Apply delete confirmation consistently to empty and populated blocks.
+- [x] Add accessible labels/titles for local add and armed delete states.
+- [x] Preserve the existing append-at-end block button.
 
 ## Validation
+- [x] Validate contextual insertion order with an isolated block-array check.
+- [x] Validate first delete activation is non-destructive by static control-flow inspection.
+- [x] Validate second armed activation reaches deletion and timeout resets the button by static control-flow inspection.
 
 - [ ] Run `node --check markdown-notes/chatgpt-markdown-notes.user.js`.
 - [x] Parse the complete userscript successfully with the V8 JavaScript parser.
