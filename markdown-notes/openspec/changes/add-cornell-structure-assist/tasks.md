@@ -12,6 +12,9 @@
 ## Implementation
 
 - [ ] Add Cornell compatibility analysis helper.
+- [ ] Serialize new Cornell blocks with semantic `### Cue:` headings.
+- [ ] Keep parser compatibility with legacy numbered cue headings.
+- [ ] Prefer the final top-level Summary delimiter so imported content can contain earlier Summary headings.
 - [ ] Add non-destructive `prepareCornellBody()`.
 - [ ] Add semantic cue insertion.
 - [ ] Add Summary navigation.
