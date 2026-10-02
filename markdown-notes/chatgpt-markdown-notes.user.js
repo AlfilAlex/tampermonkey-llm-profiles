@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.6.2
+// @version      1.7.0
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -378,6 +378,165 @@
     }
 
     return false;
+  }
+
+  function analyzeCornellCompatibility(value = activeState?.body) {
+    const body = String(value || '');
+
+    if (!body.trim()) {
+      return {
+        state: 'empty',
+        blocks: 0,
+        parsed: null
+      };
+    }
+
+    const parsed = parseCornellBody(body);
+
+    if (parsed) {
+      return {
+        state: 'ready',
+        blocks: parsed.blocks.length,
+        parsed
+      };
+    }
+
+    return {
+      state: 'freeform',
+      blocks: 0,
+      parsed: null
+    };
+  }
+
+  function prepareCornellBody() {
+    if (!activeState) return null;
+
+    const analysis = analyzeCornellCompatibility(activeState.body);
+
+    if (analysis.state === 'ready') {
+      activeState.cornell = normalizeCornellState(analysis.parsed);
+      return activeState.cornell;
+    }
+
+    if (analysis.state === 'empty') {
+      activeState.cornell = normalizeCornellState(null);
+      activeState.body = '## Cornell Notes\n\n## Summary';
+      return activeState.cornell;
+    }
+
+    activeState.cornell = normalizeCornellState(
+      importBodyAsCornell(activeState.body)
+    );
+    activeState.body = serializeCornellBody(activeState.cornell);
+
+    return activeState.cornell;
+  }
+
+  function persistSemanticCornellEdit() {
+    renderEditor();
+    renderSaveButton();
+    updateStatus();
+    scheduleDraftPersistence();
+  }
+
+  function selectTextInFreeformEditor(text, fromEnd = false) {
+    const editor = panel?.querySelector('.tmn-editor');
+    if (!editor) return false;
+
+    const value = editor.value;
+    const index = fromEnd ? value.lastIndexOf(text) : value.indexOf(text);
+    if (index < 0) return false;
+
+    editor.focus();
+    editor.setSelectionRange(index, index + text.length);
+    rememberMarkdownSelection(editor);
+    return true;
+  }
+
+  function prepareCornellFromLibre() {
+    if (!activeState || activeState.noteMode !== 'freeform') return;
+
+    const before = activeState.body;
+    prepareCornellBody();
+    persistSemanticCornellEdit();
+
+    requestAnimationFrame(() => {
+      const editor = panel?.querySelector('.tmn-editor');
+      editor?.focus();
+
+      if (!before.trim()) {
+        const summaryMarker = '## Summary';
+        const summaryIndex = editor?.value.indexOf(summaryMarker) ?? -1;
+
+        if (editor && summaryIndex >= 0) {
+          const caret = Math.max(0, summaryIndex - 1);
+          editor.setSelectionRange(caret, caret);
+          rememberMarkdownSelection(editor);
+        }
+      }
+    });
+  }
+
+  function addCornellCueFromLibre() {
+    if (!activeState || activeState.noteMode !== 'freeform') return;
+
+    prepareCornellBody();
+
+    const parsed = parseCornellBody(activeState.body);
+    if (!parsed) {
+      setStatus('No se pudo preparar una estructura Cornell válida.', 'error');
+      return;
+    }
+
+    parsed.blocks.push(createCornellBlock({
+      cue: 'Pregunta o concepto',
+      notes: ''
+    }));
+
+    activeState.cornell = normalizeCornellState(parsed);
+    activeState.body = serializeCornellBody(activeState.cornell);
+    persistSemanticCornellEdit();
+
+    requestAnimationFrame(() => {
+      selectTextInFreeformEditor('Pregunta o concepto', true);
+    });
+  }
+
+  function goToCornellSummaryFromLibre() {
+    if (!activeState || activeState.noteMode !== 'freeform') return;
+
+    prepareCornellBody();
+
+    const parsed = parseCornellBody(activeState.body);
+    if (!parsed) {
+      setStatus('No se pudo preparar una estructura Cornell válida.', 'error');
+      return;
+    }
+
+    activeState.cornell = normalizeCornellState(parsed);
+    activeState.body = serializeCornellBody(activeState.cornell);
+    persistSemanticCornellEdit();
+
+    requestAnimationFrame(() => {
+      const editor = panel?.querySelector('.tmn-editor');
+      if (!editor) return;
+
+      const marker = '## Summary';
+      const markerIndex = editor.value.indexOf(marker);
+      if (markerIndex < 0) return;
+
+      let caret = markerIndex + marker.length;
+
+      if (editor.value.slice(caret, caret + 2) === '\n\n') {
+        caret += 2;
+      } else if (editor.value[caret] === '\n') {
+        caret += 1;
+      }
+
+      editor.focus();
+      editor.setSelectionRange(caret, caret);
+      rememberMarkdownSelection(editor);
+    });
   }
 
   function createNoteId() {
