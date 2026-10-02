@@ -2220,6 +2220,30 @@
         opacity: 1;
       }
 
+      #${APP}-panel .tmn-freeform-view-switch {
+        display: flex;
+        gap: 4px;
+        padding: 6px 10px 0;
+        background: rgba(0,0,0,.06);
+      }
+
+      #${APP}-panel .tmn-freeform-view-switch[hidden] {
+        display: none !important;
+      }
+
+      #${APP}-panel .tmn-freeform-view-switch button {
+        min-height: 27px;
+        padding: 0 9px;
+        border-radius: 7px;
+        opacity: .66;
+      }
+
+      #${APP}-panel .tmn-freeform-view-switch button[aria-selected="true"] {
+        background: #f5f5f5;
+        color: #151515;
+        opacity: 1;
+      }
+
       #${APP}-panel .tmn-markdown-toolbar {
         display: flex;
         flex-wrap: wrap;
@@ -2348,6 +2372,162 @@
         height: 100%;
         min-height: 180px;
         resize: none;
+      }
+
+      #${APP}-panel .tmn-live-preview {
+        width: 100%;
+        height: 100%;
+        min-height: 180px;
+        overflow: auto;
+        padding: 2px;
+        box-sizing: border-box;
+      }
+
+      #${APP}-panel .tmn-live-empty {
+        width: 100%;
+        min-height: 140px;
+        border-style: dashed;
+        opacity: .68;
+      }
+
+      #${APP}-panel .tmn-live-block {
+        box-sizing: border-box;
+        width: 100%;
+        margin: 0 0 4px;
+        padding: 5px 7px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        cursor: text;
+        overflow-wrap: anywhere;
+      }
+
+      #${APP}-panel .tmn-live-block:hover,
+      #${APP}-panel .tmn-live-block:focus {
+        border-color: rgba(127,127,127,.2);
+        background: rgba(255,255,255,.025);
+        outline: none;
+      }
+
+      #${APP}-panel .tmn-live-block-active {
+        padding: 0;
+        border-color: transparent;
+        background: transparent;
+      }
+
+      #${APP}-panel .tmn-live-block h1,
+      #${APP}-panel .tmn-live-block h2,
+      #${APP}-panel .tmn-live-block h3,
+      #${APP}-panel .tmn-live-block h4,
+      #${APP}-panel .tmn-live-block h5,
+      #${APP}-panel .tmn-live-block h6,
+      #${APP}-panel .tmn-live-block p,
+      #${APP}-panel .tmn-live-block ul,
+      #${APP}-panel .tmn-live-block ol,
+      #${APP}-panel .tmn-live-block blockquote,
+      #${APP}-panel .tmn-live-block pre {
+        margin-top: 0;
+        margin-bottom: 0;
+      }
+
+      #${APP}-panel .tmn-live-block h1 { font-size: 1.65em; }
+      #${APP}-panel .tmn-live-block h2 { font-size: 1.4em; }
+      #${APP}-panel .tmn-live-block h3 { font-size: 1.2em; }
+
+      #${APP}-panel .tmn-live-block p,
+      #${APP}-panel .tmn-live-block li,
+      #${APP}-panel .tmn-live-block blockquote {
+        font-size: 13px;
+        line-height: 1.58;
+      }
+
+      #${APP}-panel .tmn-live-block ul,
+      #${APP}-panel .tmn-live-block ol {
+        padding-left: 24px;
+      }
+
+      #${APP}-panel .tmn-live-block blockquote {
+        padding-left: 10px;
+        border-left: 3px solid rgba(127,127,127,.35);
+        opacity: .86;
+      }
+
+      #${APP}-panel .tmn-live-block code {
+        padding: 1px 4px;
+        border-radius: 4px;
+        background: rgba(0,0,0,.24);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+
+      #${APP}-panel .tmn-live-code {
+        overflow: hidden;
+        border-radius: 8px;
+        background: rgba(0,0,0,.22);
+      }
+
+      #${APP}-panel .tmn-live-code-language {
+        padding: 5px 8px;
+        border-bottom: 1px solid rgba(127,127,127,.16);
+        font-size: 10px;
+        opacity: .62;
+      }
+
+      #${APP}-panel .tmn-live-code pre {
+        overflow-x: auto;
+        padding: 9px;
+      }
+
+      #${APP}-panel .tmn-live-code pre code {
+        padding: 0;
+        background: transparent;
+        white-space: pre;
+      }
+
+      #${APP}-panel .tmn-live-block a {
+        color: inherit;
+        text-decoration: underline;
+      }
+
+      #${APP}-panel .tmn-live-task {
+        list-style: none;
+      }
+
+      #${APP}-panel .tmn-live-task input {
+        width: auto;
+        margin: 0 7px 0 -20px;
+      }
+
+      #${APP}-panel .tmn-live-cornell-heading,
+      #${APP}-panel .tmn-live-summary-heading {
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: .05em;
+        text-transform: uppercase;
+        opacity: .72;
+      }
+
+      #${APP}-panel .tmn-live-cue-heading {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 7px;
+      }
+
+      #${APP}-panel .tmn-live-cue-heading span {
+        padding: 3px 6px;
+        border: 1px solid rgba(127,127,127,.26);
+        border-radius: 999px;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        opacity: .72;
+      }
+
+      #${APP}-panel .tmn-live-block-editor {
+        width: 100%;
+        min-height: 72px;
+        resize: none;
+        overflow: hidden;
       }
 
       #${APP}-panel .tmn-cornell-editor {
@@ -2641,6 +2821,11 @@
         <button type="button" role="tab" data-mode="review">Repaso</button>
       </div>
 
+      <div class="tmn-freeform-view-switch" role="tablist" aria-label="Vista de notas libres">
+        <button type="button" role="tab" data-freeform-view="live" aria-selected="true">Vista viva</button>
+        <button type="button" role="tab" data-freeform-view="source" aria-selected="false">Markdown</button>
+      </div>
+
       <div class="tmn-markdown-toolbar" role="toolbar" aria-label="Formato Markdown">
         <button type="button" data-md-action="bold" aria-label="Negrita" title="Negrita (Ctrl/Cmd+B)"><strong>B</strong></button>
         <button type="button" data-md-action="italic" aria-label="Cursiva" title="Cursiva (Ctrl/Cmd+I)"><em>I</em></button>
@@ -2677,6 +2862,11 @@
       </div>
 
       <div class="tmn-editor-wrap">
+        <section
+          class="tmn-live-preview tmn-view"
+          aria-label="Vista viva Markdown"
+        ></section>
+
         <textarea
           class="tmn-editor tmn-view"
           spellcheck="false"
