@@ -1517,8 +1517,14 @@
     if (block.type === 'list') {
       const lines = raw.split('\n');
       const first = lines.find(line => isMarkdownListLine(line)) || '';
-      const ordered = /^\s*\d+\.\s+/.test(first);
+      const orderedMatch = first.match(/^\s*(\d+)\.\s+/);
+      const ordered = Boolean(orderedMatch);
       const list = document.createElement(ordered ? 'ol' : 'ul');
+
+      if (ordered && Number(orderedMatch[1]) !== 1) {
+        list.start = Number(orderedMatch[1]);
+      }
+
       let lastItem = null;
 
       for (const line of lines) {
@@ -1666,7 +1672,7 @@
 
     container.replaceChildren();
 
-    if (!activeState.body) {
+    if (!activeState.body.trim()) {
       const empty = document.createElement('button');
       empty.type = 'button';
       empty.className = 'tmn-live-empty';
@@ -3821,7 +3827,7 @@
 
       setPanelWidth(currentWidth, false);
     });
-    console.info('[ChatGPT Markdown Notes] v1.7.0 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.8.0 cargado');
   }
 
   bootstrap().catch(error => {
