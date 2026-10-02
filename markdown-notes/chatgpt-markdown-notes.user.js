@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.7.0
+// @version      1.8.0
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -43,6 +43,9 @@
   let reviewRevealed = false;
 
   let markdownSelection = null;
+
+  let freeformView = 'live';
+  let liveActiveBlock = null;
 
   // ===========================================================================
   // IndexedDB
@@ -467,7 +470,36 @@
   }
 
   function selectTextInFreeformEditor(text, fromEnd = false) {
-    const editor = panel?.querySelector('.tmn-editor');
+    if (!panel || !activeState) return false;
+
+    if (freeformView === 'live') {
+      const blocks = parseMarkdownPreviewBlocks(activeState.body)
+        .filter(block => block.raw.includes(text));
+      const block = fromEnd ? blocks[blocks.length - 1] : blocks[0];
+
+      if (!block) return false;
+
+      activateLivePreviewBlock(block.start, block.end);
+
+      requestAnimationFrame(() => {
+        const editor = panel?.querySelector('.tmn-live-block-editor');
+        if (!editor) return;
+
+        const index = fromEnd
+          ? editor.value.lastIndexOf(text)
+          : editor.value.indexOf(text);
+
+        if (index < 0) return;
+
+        editor.focus();
+        editor.setSelectionRange(index, index + text.length);
+        rememberMarkdownSelection(editor);
+      });
+
+      return true;
+    }
+
+    const editor = panel.querySelector('.tmn-editor');
     if (!editor) return false;
 
     const value = editor.value;
@@ -483,11 +515,19 @@
   function prepareCornellFromLibre() {
     if (!activeState || activeState.noteMode !== 'freeform') return;
 
+    liveActiveBlock = null;
+    markdownSelection = null;
+
     const before = activeState.body;
     prepareCornellBody();
     persistSemanticCornellEdit();
 
     requestAnimationFrame(() => {
+      if (freeformView === 'live') {
+        panel?.querySelector('.tmn-live-block, .tmn-live-empty')?.focus();
+        return;
+      }
+
       const editor = panel?.querySelector('.tmn-editor');
       editor?.focus();
 
@@ -506,6 +546,9 @@
 
   function addCornellCueFromLibre() {
     if (!activeState || activeState.noteMode !== 'freeform') return;
+
+    liveActiveBlock = null;
+    markdownSelection = null;
 
     prepareCornellBody();
 
@@ -532,6 +575,9 @@
   function goToCornellSummaryFromLibre() {
     if (!activeState || activeState.noteMode !== 'freeform') return;
 
+    liveActiveBlock = null;
+    markdownSelection = null;
+
     prepareCornellBody();
 
     const parsed = parseCornellBody(activeState.body);
@@ -544,7 +590,7 @@
     activeState.body = serializeCornellBody(activeState.cornell);
     persistSemanticCornellEdit();
 
-    requestAnimationFrame(() => {
+    const focusSummaryInSource = () => {
       const editor = panel?.querySelector('.tmn-editor');
       if (!editor) return;
 
@@ -563,7 +609,14 @@
       editor.focus();
       editor.setSelectionRange(caret, caret);
       rememberMarkdownSelection(editor);
-    });
+    };
+
+    if (freeformView === 'live') {
+      setFreeformView('source');
+      requestAnimationFrame(focusSummaryInSource);
+    } else {
+      requestAnimationFrame(focusSummaryInSource);
+    }
   }
 
   function createNoteId() {
@@ -739,6 +792,9 @@
         return;
       }
     }
+
+    liveActiveBlock = null;
+    markdownSelection = null;
 
     if (activeState.noteMode === 'cornell') {
       syncBodyFromCornell();
@@ -1093,12 +1149,611 @@
   }
 
   // ===========================================================================
+  // Live Preview Markdown
+  // ===========================================================================
+
+  function markdownLinesWithOffsets(value) {
+    const text = String(value || '');
+    if (!text) return [];
+
+    const lines = [];
+    let start = 0;
+
+    for (let index = 0; index <= text.length; index += 1) {
+      if (index !== text.length && text[index] !== '\n') continue;
+
+      lines.push({
+        text: text.slice(start, index),
+        start,
+        end: index
+      });
+
+      start = index + 1;
+    }
+
+    return lines;
+  }
+
+  function markdownFenceStart(line) {
+    return String(line || '').match(/^\s*(`{3,}|~{3,})(.*)$/);
+  }
+
+  function isClosingMarkdownFence(line, fenceChar, fenceLength) {
+    const text = String(line || '').trim();
+    if (!text || text[0] !== fenceChar) return false;
+
+    let count = 0;
+    while (text[count] === fenceChar) count += 1;
+
+    return count >= fenceLength && !text.slice(count).trim();
+  }
+
+  function isMarkdownHeadingLine(line) {
+    return /^\s{0,3}#{1,6}\s+\S/.test(String(line || ''));
+  }
+
+  function isMarkdownHorizontalRule(line) {
+    return /^\s{0,3}((\*\s*){3,}|(-\s*){3,}|(_\s*){3,})$/.test(String(line || ''));
+  }
+
+  function isMarkdownListLine(line) {
+    return /^\s*(?:[-+*]|\d+\.)\s+\S/.test(String(line || ''));
+  }
+
+  function isMarkdownQuoteLine(line) {
+    return /^\s*>/.test(String(line || ''));
+  }
+
+  function isMarkdownStructuralStart(line) {
+    return Boolean(
+      markdownFenceStart(line) ||
+      isMarkdownHeadingLine(line) ||
+      isMarkdownHorizontalRule(line) ||
+      isMarkdownListLine(line) ||
+      isMarkdownQuoteLine(line)
+    );
+  }
+
+  function parseMarkdownPreviewBlocks(value) {
+    const body = String(value || '');
+    const lines = markdownLinesWithOffsets(body);
+    const blocks = [];
+    let index = 0;
+
+    while (index < lines.length) {
+      const line = lines[index];
+
+      if (!line.text.trim()) {
+        index += 1;
+        continue;
+      }
+
+      const start = line.start;
+      const fence = markdownFenceStart(line.text);
+
+      if (fence) {
+        const fenceChar = fence[1][0];
+        const fenceLength = fence[1].length;
+        let endIndex = index;
+
+        for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+          endIndex = cursor;
+
+          if (isClosingMarkdownFence(lines[cursor].text, fenceChar, fenceLength)) {
+            break;
+          }
+        }
+
+        const end = lines[endIndex].end;
+        blocks.push({ start, end, type: 'code', raw: body.slice(start, end) });
+        index = endIndex + 1;
+        continue;
+      }
+
+      if (isMarkdownHeadingLine(line.text)) {
+        blocks.push({ start, end: line.end, type: 'heading', raw: body.slice(start, line.end) });
+        index += 1;
+        continue;
+      }
+
+      if (isMarkdownHorizontalRule(line.text)) {
+        blocks.push({ start, end: line.end, type: 'hr', raw: body.slice(start, line.end) });
+        index += 1;
+        continue;
+      }
+
+      if (isMarkdownQuoteLine(line.text)) {
+        let endIndex = index;
+
+        while (
+          endIndex + 1 < lines.length &&
+          lines[endIndex + 1].text.trim() &&
+          isMarkdownQuoteLine(lines[endIndex + 1].text)
+        ) {
+          endIndex += 1;
+        }
+
+        const end = lines[endIndex].end;
+        blocks.push({ start, end, type: 'quote', raw: body.slice(start, end) });
+        index = endIndex + 1;
+        continue;
+      }
+
+      if (isMarkdownListLine(line.text)) {
+        let endIndex = index;
+
+        while (endIndex + 1 < lines.length) {
+          const next = lines[endIndex + 1].text;
+
+          if (!next.trim()) break;
+          if (
+            isMarkdownHeadingLine(next) ||
+            markdownFenceStart(next) ||
+            isMarkdownHorizontalRule(next) ||
+            isMarkdownQuoteLine(next)
+          ) {
+            break;
+          }
+
+          endIndex += 1;
+        }
+
+        const end = lines[endIndex].end;
+        blocks.push({ start, end, type: 'list', raw: body.slice(start, end) });
+        index = endIndex + 1;
+        continue;
+      }
+
+      let endIndex = index;
+
+      while (endIndex + 1 < lines.length) {
+        const next = lines[endIndex + 1].text;
+        if (!next.trim() || isMarkdownStructuralStart(next)) break;
+        endIndex += 1;
+      }
+
+      const end = lines[endIndex].end;
+      blocks.push({ start, end, type: 'paragraph', raw: body.slice(start, end) });
+      index = endIndex + 1;
+    }
+
+    return blocks;
+  }
+  function safePreviewHref(value) {
+    const href = String(value || '').trim();
+    return /^(https?:|mailto:)/i.test(href) ? href : '';
+  }
+
+  function appendPreviewInline(parent, value) {
+    const text = String(value || '');
+    let index = 0;
+
+    const appendPlain = plain => {
+      if (plain) parent.appendChild(document.createTextNode(plain));
+    };
+
+    while (index < text.length) {
+      if (text.startsWith('**', index)) {
+        const end = text.indexOf('**', index + 2);
+
+        if (end > index + 2) {
+          const strong = document.createElement('strong');
+          appendPreviewInline(strong, text.slice(index + 2, end));
+          parent.appendChild(strong);
+          index = end + 2;
+          continue;
+        }
+      }
+
+      if (text[index] === '*' && text[index + 1] !== '*') {
+        const end = text.indexOf('*', index + 1);
+
+        if (end > index + 1) {
+          const em = document.createElement('em');
+          appendPreviewInline(em, text.slice(index + 1, end));
+          parent.appendChild(em);
+          index = end + 1;
+          continue;
+        }
+      }
+
+      if (text[index] === '`') {
+        const end = text.indexOf('`', index + 1);
+
+        if (end > index + 1) {
+          const code = document.createElement('code');
+          code.textContent = text.slice(index + 1, end);
+          parent.appendChild(code);
+          index = end + 1;
+          continue;
+        }
+      }
+
+      if (text[index] === '[') {
+        const match = text.slice(index).match(/^\[([^\]]+)\]\(([^)]+)\)/);
+
+        if (match) {
+          const href = safePreviewHref(match[2]);
+
+          if (href) {
+            const link = document.createElement('a');
+            link.href = href;
+            link.textContent = match[1];
+
+            if (/^https?:/i.test(href)) {
+              link.target = '_blank';
+              link.rel = 'noopener noreferrer';
+            }
+
+            link.addEventListener('click', event => {
+              event.stopPropagation();
+            });
+
+            parent.appendChild(link);
+          } else {
+            appendPlain(match[0]);
+          }
+
+          index += match[0].length;
+          continue;
+        }
+      }
+
+      let next = index + 1;
+
+      while (
+        next < text.length &&
+        !text.startsWith('**', next) &&
+        text[next] !== '*' &&
+        text[next] !== '`' &&
+        text[next] !== '['
+      ) {
+        next += 1;
+      }
+
+      appendPlain(text.slice(index, next));
+      index = next;
+    }
+  }
+
+  function appendPreviewLines(parent, lines) {
+    lines.forEach((line, index) => {
+      if (index > 0) parent.appendChild(document.createElement('br'));
+      appendPreviewInline(parent, line);
+    });
+  }
+
+  function renderMarkdownPreviewBlockContent(container, block) {
+    const raw = String(block.raw || '');
+
+    if (block.type === 'heading') {
+      const match = raw.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*$/);
+      const level = Math.min(6, Math.max(1, match?.[1]?.length || 2));
+      const label = String(match?.[2] || raw).trim();
+
+      if (level === 2 && label === 'Cornell Notes') {
+        const heading = document.createElement('div');
+        heading.className = 'tmn-live-cornell-heading';
+        heading.textContent = 'Cornell Notes';
+        container.appendChild(heading);
+        return;
+      }
+
+      if (level === 2 && label === 'Summary') {
+        const heading = document.createElement('div');
+        heading.className = 'tmn-live-summary-heading';
+        heading.textContent = 'Resumen';
+        container.appendChild(heading);
+        return;
+      }
+
+      const cue = level === 3 ? label.match(/^Cue:\s*(.*)$/i) : null;
+
+      if (cue) {
+        const wrap = document.createElement('div');
+        wrap.className = 'tmn-live-cue-heading';
+
+        const badge = document.createElement('span');
+        badge.textContent = 'Cue / Pregunta';
+
+        const cueText = document.createElement('strong');
+        appendPreviewInline(cueText, cue[1] || 'Nota');
+
+        wrap.append(badge, cueText);
+        container.appendChild(wrap);
+        return;
+      }
+
+      const heading = document.createElement('h' + level);
+      appendPreviewInline(heading, label);
+      container.appendChild(heading);
+      return;
+    }
+
+    if (block.type === 'hr') {
+      container.appendChild(document.createElement('hr'));
+      return;
+    }
+
+    if (block.type === 'code') {
+      const lines = raw.split('\n');
+      const open = markdownFenceStart(lines[0]);
+      const token = open?.[1] || '';
+      const language = String(open?.[2] || '').trim();
+      const hasClose = Boolean(
+        token &&
+        lines.length > 1 &&
+        isClosingMarkdownFence(lines[lines.length - 1], token[0], token.length)
+      );
+      const content = lines.slice(1, hasClose ? -1 : undefined).join('\n');
+
+      const wrap = document.createElement('div');
+      wrap.className = 'tmn-live-code';
+
+      if (language) {
+        const meta = document.createElement('div');
+        meta.className = 'tmn-live-code-language';
+        meta.textContent = language;
+        wrap.appendChild(meta);
+      }
+
+      const pre = document.createElement('pre');
+      const code = document.createElement('code');
+      code.textContent = content;
+      pre.appendChild(code);
+      wrap.appendChild(pre);
+      container.appendChild(wrap);
+      return;
+    }
+
+    if (block.type === 'quote') {
+      const quote = document.createElement('blockquote');
+      const lines = raw.split('\n').map(line => line.replace(/^\s*>\s?/, ''));
+      appendPreviewLines(quote, lines);
+      container.appendChild(quote);
+      return;
+    }
+
+    if (block.type === 'list') {
+      const lines = raw.split('\n');
+      const first = lines.find(line => isMarkdownListLine(line)) || '';
+      const orderedMatch = first.match(/^\s*(\d+)\.\s+/);
+      const ordered = Boolean(orderedMatch);
+      const list = document.createElement(ordered ? 'ol' : 'ul');
+
+      if (ordered && Number(orderedMatch[1]) !== 1) {
+        list.start = Number(orderedMatch[1]);
+      }
+
+      let lastItem = null;
+
+      for (const line of lines) {
+        const match = line.match(/^\s*(?:([-+*])|(\d+)\.)\s+(.+)$/);
+
+        if (!match) {
+          if (lastItem) {
+            lastItem.appendChild(document.createElement('br'));
+            appendPreviewInline(lastItem, line.trim());
+          }
+          continue;
+        }
+
+        const item = document.createElement('li');
+        let content = match[3];
+        const task = content.match(/^\[([ xX])\]\s+(.*)$/);
+
+        if (task) {
+          item.classList.add('tmn-live-task');
+
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = task[1].toLowerCase() === 'x';
+          checkbox.disabled = true;
+          checkbox.tabIndex = -1;
+          item.appendChild(checkbox);
+          content = task[2];
+        }
+
+        appendPreviewInline(item, content);
+        list.appendChild(item);
+        lastItem = item;
+      }
+
+      container.appendChild(list);
+      return;
+    }
+
+    const paragraph = document.createElement('p');
+    appendPreviewLines(paragraph, raw.split('\n'));
+    container.appendChild(paragraph);
+  }
+  function resizeLiveBlockEditor(editor) {
+    if (!(editor instanceof HTMLTextAreaElement)) return;
+
+    editor.style.height = 'auto';
+    editor.style.height = Math.max(72, editor.scrollHeight) + 'px';
+  }
+
+  function activateLivePreviewBlock(start, end) {
+    if (!activeState || freeformView !== 'live') return;
+
+    liveActiveBlock = { start, end };
+    markdownSelection = null;
+    renderLivePreview();
+    renderMarkdownToolbar();
+
+    requestAnimationFrame(() => {
+      const editor = panel?.querySelector('.tmn-live-block-editor');
+      if (!editor) return;
+
+      editor.focus();
+      editor.setSelectionRange(editor.value.length, editor.value.length);
+      rememberMarkdownSelection(editor);
+      resizeLiveBlockEditor(editor);
+      renderMarkdownToolbar();
+    });
+  }
+
+  function deactivateLivePreviewBlock() {
+    if (!liveActiveBlock) return;
+
+    liveActiveBlock = null;
+    markdownSelection = null;
+    renderLivePreview();
+    renderMarkdownToolbar();
+  }
+
+  function updateBodyFromLiveBlock(editor) {
+    if (
+      !(editor instanceof HTMLTextAreaElement) ||
+      !activeState ||
+      !liveActiveBlock
+    ) {
+      return;
+    }
+
+    const start = liveActiveBlock.start;
+    const end = liveActiveBlock.end;
+    const replacement = editor.value;
+
+    activeState.body =
+      activeState.body.slice(0, start) +
+      replacement +
+      activeState.body.slice(end);
+
+    liveActiveBlock.end = start + replacement.length;
+    activeState.cornell = normalizeCornellState(null);
+
+    rememberMarkdownSelection(editor);
+    resizeLiveBlockEditor(editor);
+    renderCornellStructureAssistant();
+    renderSaveButton();
+    updateStatus();
+    scheduleDraftPersistence();
+  }
+
+  function setFreeformView(view) {
+    if (!['live', 'source'].includes(view)) return;
+    if (freeformView === view) return;
+
+    liveActiveBlock = null;
+    markdownSelection = null;
+    freeformView = view;
+    renderEditor();
+
+    requestAnimationFrame(() => {
+      if (freeformView === 'source') {
+        panel?.querySelector('.tmn-editor')?.focus();
+      }
+    });
+  }
+
+  function renderFreeformViewSwitch() {
+    if (!panel || !activeState) return;
+
+    const switcher = panel.querySelector('.tmn-freeform-view-switch');
+    if (!switcher) return;
+
+    switcher.hidden = activeState.noteMode !== 'freeform';
+
+    for (const button of switcher.querySelectorAll('button[data-freeform-view]')) {
+      button.setAttribute(
+        'aria-selected',
+        String(button.dataset.freeformView === freeformView)
+      );
+    }
+  }
+
+  function renderLivePreview() {
+    if (!panel || !activeState) return;
+
+    const container = panel.querySelector('.tmn-live-preview');
+    if (!container) return;
+
+    container.replaceChildren();
+
+    if (!activeState.body.trim()) {
+      const empty = document.createElement('button');
+      empty.type = 'button';
+      empty.className = 'tmn-live-empty';
+      empty.textContent = 'Empieza a escribir tu nota…';
+      empty.addEventListener('click', () => {
+        setFreeformView('source');
+      });
+      container.appendChild(empty);
+      return;
+    }
+
+    const blocks = parseMarkdownPreviewBlocks(activeState.body);
+
+    for (const block of blocks) {
+      const article = document.createElement('article');
+      article.className = 'tmn-live-block tmn-live-block-' + block.type;
+      article.dataset.start = String(block.start);
+      article.dataset.end = String(block.end);
+
+      const isActive = liveActiveBlock?.start === block.start;
+
+      if (isActive) {
+        const editor = document.createElement('textarea');
+        editor.className = 'tmn-live-block-editor';
+        editor.spellcheck = false;
+        editor.value = activeState.body.slice(
+          liveActiveBlock.start,
+          liveActiveBlock.end
+        );
+
+        editor.addEventListener('input', () => {
+          updateBodyFromLiveBlock(editor);
+        });
+
+        editor.addEventListener('keydown', event => {
+          if (event.key !== 'Escape') return;
+
+          event.preventDefault();
+          deactivateLivePreviewBlock();
+        });
+
+        editor.addEventListener('blur', () => {
+          window.setTimeout(() => {
+            if (!editor.isConnected) return;
+            if (document.activeElement === editor) return;
+            deactivateLivePreviewBlock();
+          }, 0);
+        });
+
+        article.classList.add('tmn-live-block-active');
+        article.appendChild(editor);
+      } else {
+        article.tabIndex = 0;
+        article.setAttribute('aria-label', 'Editar bloque Markdown');
+        renderMarkdownPreviewBlockContent(article, block);
+
+        article.addEventListener('click', event => {
+          if (event.target instanceof HTMLAnchorElement) return;
+          activateLivePreviewBlock(block.start, block.end);
+        });
+
+        article.addEventListener('keydown', event => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          if (event.target !== article) return;
+
+          event.preventDefault();
+          activateLivePreviewBlock(block.start, block.end);
+        });
+      }
+
+      container.appendChild(article);
+    }
+  }
+  // ===========================================================================
   // Herramientas Markdown
   // ===========================================================================
 
   function isMarkdownTextarea(target) {
     return target instanceof HTMLTextAreaElement && (
       target.classList.contains('tmn-editor') ||
+      target.classList.contains('tmn-live-block-editor') ||
       target.classList.contains('tmn-block-notes') ||
       target.classList.contains('tmn-summary-editor')
     );
@@ -1118,7 +1773,9 @@
     if (!panel || !activeState || activeState.noteMode === 'review') return null;
 
     if (activeState.noteMode === 'freeform') {
-      return panel.querySelector('.tmn-editor');
+      return freeformView === 'live'
+        ? panel.querySelector('.tmn-live-block-editor')
+        : panel.querySelector('.tmn-editor');
     }
 
     return panel.querySelector('.tmn-block-notes') ||
@@ -1129,7 +1786,9 @@
     if (!isMarkdownTextarea(target) || !activeState) return false;
 
     if (activeState.noteMode === 'freeform') {
-      return target.classList.contains('tmn-editor');
+      return freeformView === 'live'
+        ? target.classList.contains('tmn-live-block-editor')
+        : target.classList.contains('tmn-editor');
     }
 
     if (activeState.noteMode === 'cornell') {
@@ -1373,6 +2032,18 @@
     if (!toolbar) return;
 
     toolbar.hidden = activeState.noteMode === 'review';
+
+    const liveWithoutEditor =
+      activeState.noteMode === 'freeform' &&
+      freeformView === 'live' &&
+      !panel.querySelector('.tmn-live-block-editor');
+
+    for (const button of toolbar.querySelectorAll('button[data-md-action]')) {
+      button.disabled = liveWithoutEditor;
+      button.title = liveWithoutEditor
+        ? 'Selecciona un bloque en Vista viva para darle formato.'
+        : button.dataset.defaultTitle || button.title;
+    }
   }
 
   function renderCornellStructureAssistant({ emphasize = false } = {}) {
@@ -1608,6 +2279,30 @@
         opacity: 1;
       }
 
+      #${APP}-panel .tmn-freeform-view-switch {
+        display: flex;
+        gap: 4px;
+        padding: 6px 10px 0;
+        background: rgba(0,0,0,.06);
+      }
+
+      #${APP}-panel .tmn-freeform-view-switch[hidden] {
+        display: none !important;
+      }
+
+      #${APP}-panel .tmn-freeform-view-switch button {
+        min-height: 27px;
+        padding: 0 9px;
+        border-radius: 7px;
+        opacity: .66;
+      }
+
+      #${APP}-panel .tmn-freeform-view-switch button[aria-selected="true"] {
+        background: #f5f5f5;
+        color: #151515;
+        opacity: 1;
+      }
+
       #${APP}-panel .tmn-markdown-toolbar {
         display: flex;
         flex-wrap: wrap;
@@ -1736,6 +2431,162 @@
         height: 100%;
         min-height: 180px;
         resize: none;
+      }
+
+      #${APP}-panel .tmn-live-preview {
+        width: 100%;
+        height: 100%;
+        min-height: 180px;
+        overflow: auto;
+        padding: 2px;
+        box-sizing: border-box;
+      }
+
+      #${APP}-panel .tmn-live-empty {
+        width: 100%;
+        min-height: 140px;
+        border-style: dashed;
+        opacity: .68;
+      }
+
+      #${APP}-panel .tmn-live-block {
+        box-sizing: border-box;
+        width: 100%;
+        margin: 0 0 4px;
+        padding: 5px 7px;
+        border: 1px solid transparent;
+        border-radius: 8px;
+        cursor: text;
+        overflow-wrap: anywhere;
+      }
+
+      #${APP}-panel .tmn-live-block:hover,
+      #${APP}-panel .tmn-live-block:focus {
+        border-color: rgba(127,127,127,.2);
+        background: rgba(255,255,255,.025);
+        outline: none;
+      }
+
+      #${APP}-panel .tmn-live-block-active {
+        padding: 0;
+        border-color: transparent;
+        background: transparent;
+      }
+
+      #${APP}-panel .tmn-live-block h1,
+      #${APP}-panel .tmn-live-block h2,
+      #${APP}-panel .tmn-live-block h3,
+      #${APP}-panel .tmn-live-block h4,
+      #${APP}-panel .tmn-live-block h5,
+      #${APP}-panel .tmn-live-block h6,
+      #${APP}-panel .tmn-live-block p,
+      #${APP}-panel .tmn-live-block ul,
+      #${APP}-panel .tmn-live-block ol,
+      #${APP}-panel .tmn-live-block blockquote,
+      #${APP}-panel .tmn-live-block pre {
+        margin-top: 0;
+        margin-bottom: 0;
+      }
+
+      #${APP}-panel .tmn-live-block h1 { font-size: 1.65em; }
+      #${APP}-panel .tmn-live-block h2 { font-size: 1.4em; }
+      #${APP}-panel .tmn-live-block h3 { font-size: 1.2em; }
+
+      #${APP}-panel .tmn-live-block p,
+      #${APP}-panel .tmn-live-block li,
+      #${APP}-panel .tmn-live-block blockquote {
+        font-size: 13px;
+        line-height: 1.58;
+      }
+
+      #${APP}-panel .tmn-live-block ul,
+      #${APP}-panel .tmn-live-block ol {
+        padding-left: 24px;
+      }
+
+      #${APP}-panel .tmn-live-block blockquote {
+        padding-left: 10px;
+        border-left: 3px solid rgba(127,127,127,.35);
+        opacity: .86;
+      }
+
+      #${APP}-panel .tmn-live-block code {
+        padding: 1px 4px;
+        border-radius: 4px;
+        background: rgba(0,0,0,.24);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+
+      #${APP}-panel .tmn-live-code {
+        overflow: hidden;
+        border-radius: 8px;
+        background: rgba(0,0,0,.22);
+      }
+
+      #${APP}-panel .tmn-live-code-language {
+        padding: 5px 8px;
+        border-bottom: 1px solid rgba(127,127,127,.16);
+        font-size: 10px;
+        opacity: .62;
+      }
+
+      #${APP}-panel .tmn-live-code pre {
+        overflow-x: auto;
+        padding: 9px;
+      }
+
+      #${APP}-panel .tmn-live-code pre code {
+        padding: 0;
+        background: transparent;
+        white-space: pre;
+      }
+
+      #${APP}-panel .tmn-live-block a {
+        color: inherit;
+        text-decoration: underline;
+      }
+
+      #${APP}-panel .tmn-live-task {
+        list-style: none;
+      }
+
+      #${APP}-panel .tmn-live-task input {
+        width: auto;
+        margin: 0 7px 0 -20px;
+      }
+
+      #${APP}-panel .tmn-live-cornell-heading,
+      #${APP}-panel .tmn-live-summary-heading {
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: .05em;
+        text-transform: uppercase;
+        opacity: .72;
+      }
+
+      #${APP}-panel .tmn-live-cue-heading {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 7px;
+      }
+
+      #${APP}-panel .tmn-live-cue-heading span {
+        padding: 3px 6px;
+        border: 1px solid rgba(127,127,127,.26);
+        border-radius: 999px;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        opacity: .72;
+      }
+
+      #${APP}-panel .tmn-live-block-editor {
+        width: 100%;
+        min-height: 72px;
+        resize: none;
+        overflow: hidden;
       }
 
       #${APP}-panel .tmn-cornell-editor {
@@ -2029,6 +2880,11 @@
         <button type="button" role="tab" data-mode="review">Repaso</button>
       </div>
 
+      <div class="tmn-freeform-view-switch" role="tablist" aria-label="Vista de notas libres">
+        <button type="button" role="tab" data-freeform-view="live" aria-selected="true">Vista viva</button>
+        <button type="button" role="tab" data-freeform-view="source" aria-selected="false">Markdown</button>
+      </div>
+
       <div class="tmn-markdown-toolbar" role="toolbar" aria-label="Formato Markdown">
         <button type="button" data-md-action="bold" aria-label="Negrita" title="Negrita (Ctrl/Cmd+B)"><strong>B</strong></button>
         <button type="button" data-md-action="italic" aria-label="Cursiva" title="Cursiva (Ctrl/Cmd+I)"><em>I</em></button>
@@ -2065,6 +2921,11 @@
       </div>
 
       <div class="tmn-editor-wrap">
+        <section
+          class="tmn-live-preview tmn-view"
+          aria-label="Vista viva Markdown"
+        ></section>
+
         <textarea
           class="tmn-editor tmn-view"
           spellcheck="false"
@@ -2157,7 +3018,20 @@
       setNoteMode(button.dataset.mode);
     });
 
+    panel.querySelector('.tmn-freeform-view-switch').addEventListener('click', event => {
+      const button = event.target instanceof Element
+        ? event.target.closest('button[data-freeform-view]')
+        : null;
+
+      if (!button) return;
+      setFreeformView(button.dataset.freeformView);
+    });
+
     const markdownToolbar = panel.querySelector('.tmn-markdown-toolbar');
+
+    for (const button of markdownToolbar.querySelectorAll('button[data-md-action]')) {
+      button.dataset.defaultTitle = button.title;
+    }
 
     markdownToolbar.addEventListener('pointerdown', event => {
       const button = event.target instanceof Element
@@ -2414,7 +3288,13 @@
     if (!panel || !activeState) return;
 
     if (activeState.noteMode === 'freeform') {
-      panel.querySelector('.tmn-editor')?.focus();
+      if (freeformView === 'live') {
+        panel.querySelector(
+          '.tmn-live-block-editor, .tmn-live-block, .tmn-live-empty'
+        )?.focus();
+      } else {
+        panel.querySelector('.tmn-editor')?.focus();
+      }
       return;
     }
 
@@ -2624,31 +3504,43 @@
   function renderEditor() {
     if (!panel || !activeState) return;
 
-    renderMarkdownToolbar();
+    renderFreeformViewSwitch();
     renderCornellStructureAssistant();
 
     const editor = panel.querySelector('.tmn-editor');
+    const livePreview = panel.querySelector('.tmn-live-preview');
     const cornell = panel.querySelector('.tmn-cornell-editor');
     const review = panel.querySelector('.tmn-review');
 
     const mode = activeState.noteMode;
-    editor.hidden = mode !== 'freeform';
+    const isFreeform = mode === 'freeform';
+
+    editor.hidden = !isFreeform || freeformView !== 'source';
+    livePreview.hidden = !isFreeform || freeformView !== 'live';
     cornell.hidden = mode !== 'cornell';
     review.hidden = mode !== 'review';
 
-    if (mode === 'freeform') {
-      if (editor.value !== activeState.body) {
-        editor.value = activeState.body;
+    if (isFreeform) {
+      if (freeformView === 'source') {
+        if (editor.value !== activeState.body) {
+          editor.value = activeState.body;
+        }
+      } else {
+        renderLivePreview();
       }
+
+      renderMarkdownToolbar();
       return;
     }
 
     if (mode === 'cornell') {
       renderCornellEditor();
+      renderMarkdownToolbar();
       return;
     }
 
     renderReview();
+    renderMarkdownToolbar();
   }
 
   function renderSaveButton() {
@@ -2829,6 +3721,8 @@
 
     activeChatKey = chatKey;
     activeState = await loadState(chatKey);
+    liveActiveBlock = null;
+    markdownSelection = null;
 
     renderAll();
   }
@@ -2878,12 +3772,12 @@
     const isSave = modifier && key === 's';
     if (!isSave) return;
 
-    const editor = panel.querySelector('.tmn-editor');
     const filenameInput = panel.querySelector('.tmn-file-name');
     const insideCornellEditor = event.target instanceof Element &&
       Boolean(event.target.closest('.tmn-cornell-editor'));
+    const insideMarkdownEditor = isMarkdownTextarea(event.target);
 
-    if (event.target !== editor && event.target !== filenameInput && !insideCornellEditor) return;
+    if (!insideMarkdownEditor && event.target !== filenameInput && !insideCornellEditor) return;
 
     event.preventDefault();
     event.stopPropagation();
@@ -2933,7 +3827,7 @@
 
       setPanelWidth(currentWidth, false);
     });
-    console.info('[ChatGPT Markdown Notes] v1.7.0 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.8.0 cargado');
   }
 
   bootstrap().catch(error => {
