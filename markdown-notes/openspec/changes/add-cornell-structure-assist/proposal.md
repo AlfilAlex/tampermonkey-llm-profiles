@@ -7,7 +7,7 @@ Libre and Cornell now share one canonical Markdown body, but the relationship is
 The current Cornell parser recognizes a specific generated structure:
 
 - `## Cornell Notes`
-- numbered `### N. ...` cue headings
+- semantic `### Cue: ...` headings (while continuing to read legacy numbered cue headings)
 - `## Summary`
 
 A user editing in Libre sees generic Markdown controls such as H2/H3 and has no clear indication of:
@@ -82,7 +82,7 @@ The user never needs to know that the persisted representation uses H2/H3 intern
 - Existing canonical Cornell Markdown is recognized without rewriting.
 - Existing Cornell structured state remains derived from the canonical body.
 - Preparation preserves arbitrary Markdown, including lists, fenced code, Mermaid, and headings, by placing it in one neutral notes block.
-- The saved Markdown format remains portable and unchanged for Cornell documents.
+- The saved Markdown remains portable. New Cornell serialization uses semantic `### Cue: ...` headings; legacy numbered Cornell documents remain readable.
 - Conversation isolation, reload persistence, manual filename requirements, and saved-file behavior remain unchanged.
 
 ## Capabilities
