@@ -1798,6 +1798,12 @@
         padding: 0 7px;
       }
 
+      #${APP}-panel .tmn-cornell-actions .tmn-delete-confirm {
+        font-weight: 700;
+        box-shadow: inset 0 0 0 1px rgba(220,220,220,.34);
+        background: rgba(255,255,255,.08);
+      }
+
       #${APP}-panel .tmn-cornell-grid {
         display: grid;
         grid-template-columns: minmax(0, 1fr);
@@ -2227,7 +2233,8 @@
 
       if (button.dataset.action === 'up') moveCornellBlock(blockId, -1);
       else if (button.dataset.action === 'down') moveCornellBlock(blockId, 1);
-      else if (button.dataset.action === 'delete') deleteCornellBlock(blockId);
+      else if (button.dataset.action === 'addAfter') insertCornellBlockAfter(blockId);
+      else if (button.dataset.action === 'delete') confirmCornellBlockDelete(button, blockId);
     });
 
     panel.querySelector('.tmn-summary-editor').addEventListener('input', event => {
@@ -2495,6 +2502,7 @@
       const actionDefs = [
         ['up', '↑', `Mover bloque ${index + 1} arriba`, index === 0],
         ['down', '↓', `Mover bloque ${index + 1} abajo`, index === activeState.cornell.blocks.length - 1],
+        ['addAfter', '+', `Añadir bloque después del bloque ${index + 1}`, false],
         ['delete', 'Eliminar', `Eliminar bloque ${index + 1}`, false]
       ];
 
