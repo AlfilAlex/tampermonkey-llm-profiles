@@ -32,13 +32,13 @@
 
 - [ ] Run `node --check markdown-notes/chatgpt-markdown-notes.user.js`.
 - [x] Parse the complete userscript successfully with the V8 JavaScript parser.
-- [ ] Validate empty note preparation.
+- [x] Validate empty note preparation with an isolated structure check.
 - [x] Validate arbitrary Markdown preparation preserves note content using an isolated parser/serializer check.
 - [x] Validate fenced code and heading-like Cornell markers survive preparation in isolated parser/serializer checks.
 - [x] Validate semantic Cornell serialization and parsing round-trip, including legacy numbered compatibility.
-- [ ] Validate Summary navigation caret placement.
-- [ ] Validate non-canonical Libre cannot silently switch to Cornell.
-- [ ] Validate canonical Cornell switches normally.
+- [x] Validate Summary navigation caret placement with an isolated string-position check.
+- [x] Validate non-canonical Libre gating logic with an isolated compatibility-state check.
+- [x] Validate canonical Cornell compatibility-state path with an isolated check.
 - [ ] Validate assistant hidden in Cornell and Repaso.
 - [ ] Validate narrow-panel wrapping without horizontal scrolling.
 - [ ] Validate reload restores the prepared body.
