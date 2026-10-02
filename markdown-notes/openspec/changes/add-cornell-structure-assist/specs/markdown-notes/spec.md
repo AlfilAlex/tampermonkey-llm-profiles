@@ -89,7 +89,7 @@ Libre MUST allow users to add Cornell cues without manually constructing Markdow
 - **GIVEN** Libre contains canonical Cornell Markdown
 - **WHEN** the user activates `+ Cue / Pregunta`
 - **THEN** Markdown Notes SHALL append a new Cornell block before Summary
-- **AND** SHALL serialize a valid numbered cue heading
+- **AND** SHALL serialize a semantic `### Cue: ...` heading
 - **AND** SHALL focus/select the cue placeholder for immediate replacement.
 
 #### Scenario: Add cue to arbitrary Libre note
@@ -134,3 +134,28 @@ Libre MUST explain Cornell semantics without requiring the user to understand in
 - **WHEN** heading controls are rendered
 - **THEN** their visible labels SHALL describe generic document structure rather than implying Cornell semantics
 - **AND** accessible labels/tooltips SHALL still identify the corresponding Markdown heading level.
+
+
+### Requirement: Semantic Cornell Markdown cues
+
+New Cornell serialization MUST make cue boundaries understandable in raw Libre Markdown while remaining backward compatible.
+
+#### Scenario: New Cornell serialization
+
+- **GIVEN** a Cornell block has a cue
+- **WHEN** Markdown Notes serializes the canonical body
+- **THEN** the block SHALL use a `### Cue: ...` heading
+- **AND** block identity SHALL NOT depend on persisted numeric ordering.
+
+#### Scenario: Legacy numbered Cornell body
+
+- **GIVEN** an existing canonical body uses legacy numbered `### N. ...` cue headings
+- **WHEN** Markdown Notes parses the body
+- **THEN** the existing cues and notes SHALL remain reconstructable.
+
+#### Scenario: Generic numbered heading inside semantic Cornell notes
+
+- **GIVEN** a semantic Cornell block contains an ordinary numbered H3 heading in its notes
+- **WHEN** the body is parsed
+- **THEN** that heading SHALL remain note content
+- **AND** SHALL NOT create another Cornell block.
