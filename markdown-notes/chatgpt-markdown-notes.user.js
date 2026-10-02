@@ -1266,6 +1266,248 @@
 
     return blocks;
   }
+  function safePreviewHref(value) {
+    const href = String(value || '').trim();
+    return /^(https?:|mailto:)/i.test(href) ? href : '';
+  }
+
+  function appendPreviewInline(parent, value) {
+    const text = String(value || '');
+    let index = 0;
+
+    const appendPlain = plain => {
+      if (plain) parent.appendChild(document.createTextNode(plain));
+    };
+
+    while (index < text.length) {
+      if (text.startsWith('**', index)) {
+        const end = text.indexOf('**', index + 2);
+
+        if (end > index + 2) {
+          const strong = document.createElement('strong');
+          appendPreviewInline(strong, text.slice(index + 2, end));
+          parent.appendChild(strong);
+          index = end + 2;
+          continue;
+        }
+      }
+
+      if (text[index] === '*' && text[index + 1] !== '*') {
+        const end = text.indexOf('*', index + 1);
+
+        if (end > index + 1) {
+          const em = document.createElement('em');
+          appendPreviewInline(em, text.slice(index + 1, end));
+          parent.appendChild(em);
+          index = end + 1;
+          continue;
+        }
+      }
+
+      if (text[index] === '`') {
+        const end = text.indexOf('`', index + 1);
+
+        if (end > index + 1) {
+          const code = document.createElement('code');
+          code.textContent = text.slice(index + 1, end);
+          parent.appendChild(code);
+          index = end + 1;
+          continue;
+        }
+      }
+
+      if (text[index] === '[') {
+        const match = text.slice(index).match(/^\[([^\]]+)\]\(([^)]+)\)/);
+
+        if (match) {
+          const href = safePreviewHref(match[2]);
+
+          if (href) {
+            const link = document.createElement('a');
+            link.href = href;
+            link.textContent = match[1];
+
+            if (/^https?:/i.test(href)) {
+              link.target = '_blank';
+              link.rel = 'noopener noreferrer';
+            }
+
+            link.addEventListener('click', event => {
+              event.stopPropagation();
+            });
+
+            parent.appendChild(link);
+          } else {
+            appendPlain(match[0]);
+          }
+
+          index += match[0].length;
+          continue;
+        }
+      }
+
+      let next = index + 1;
+
+      while (
+        next < text.length &&
+        !text.startsWith('**', next) &&
+        text[next] !== '*' &&
+        text[next] !== '`' &&
+        text[next] !== '['
+      ) {
+        next += 1;
+      }
+
+      appendPlain(text.slice(index, next));
+      index = next;
+    }
+  }
+
+  function appendPreviewLines(parent, lines) {
+    lines.forEach((line, index) => {
+      if (index > 0) parent.appendChild(document.createElement('br'));
+      appendPreviewInline(parent, line);
+    });
+  }
+
+  function renderMarkdownPreviewBlockContent(container, block) {
+    const raw = String(block.raw || '');
+
+    if (block.type === 'heading') {
+      const match = raw.match(/^\s{0,3}(#{1,6})\s+(.+?)\s*$/);
+      const level = Math.min(6, Math.max(1, match?.[1]?.length || 2));
+      const label = String(match?.[2] || raw).trim();
+
+      if (level === 2 && label === 'Cornell Notes') {
+        const heading = document.createElement('div');
+        heading.className = 'tmn-live-cornell-heading';
+        heading.textContent = 'Cornell Notes';
+        container.appendChild(heading);
+        return;
+      }
+
+      if (level === 2 && label === 'Summary') {
+        const heading = document.createElement('div');
+        heading.className = 'tmn-live-summary-heading';
+        heading.textContent = 'Resumen';
+        container.appendChild(heading);
+        return;
+      }
+
+      const cue = level === 3 ? label.match(/^Cue:\s*(.*)$/i) : null;
+
+      if (cue) {
+        const wrap = document.createElement('div');
+        wrap.className = 'tmn-live-cue-heading';
+
+        const badge = document.createElement('span');
+        badge.textContent = 'Cue / Pregunta';
+
+        const cueText = document.createElement('strong');
+        appendPreviewInline(cueText, cue[1] || 'Nota');
+
+        wrap.append(badge, cueText);
+        container.appendChild(wrap);
+        return;
+      }
+
+      const heading = document.createElement('h' + level);
+      appendPreviewInline(heading, label);
+      container.appendChild(heading);
+      return;
+    }
+
+    if (block.type === 'hr') {
+      container.appendChild(document.createElement('hr'));
+      return;
+    }
+
+    if (block.type === 'code') {
+      const lines = raw.split('\n');
+      const open = markdownFenceStart(lines[0]);
+      const token = open?.[1] || '';
+      const language = String(open?.[2] || '').trim();
+      const hasClose = Boolean(
+        token &&
+        lines.length > 1 &&
+        isClosingMarkdownFence(lines[lines.length - 1], token[0], token.length)
+      );
+      const content = lines.slice(1, hasClose ? -1 : undefined).join('\n');
+
+      const wrap = document.createElement('div');
+      wrap.className = 'tmn-live-code';
+
+      if (language) {
+        const meta = document.createElement('div');
+        meta.className = 'tmn-live-code-language';
+        meta.textContent = language;
+        wrap.appendChild(meta);
+      }
+
+      const pre = document.createElement('pre');
+      const code = document.createElement('code');
+      code.textContent = content;
+      pre.appendChild(code);
+      wrap.appendChild(pre);
+      container.appendChild(wrap);
+      return;
+    }
+
+    if (block.type === 'quote') {
+      const quote = document.createElement('blockquote');
+      const lines = raw.split('\n').map(line => line.replace(/^\s*>\s?/, ''));
+      appendPreviewLines(quote, lines);
+      container.appendChild(quote);
+      return;
+    }
+
+    if (block.type === 'list') {
+      const lines = raw.split('\n');
+      const first = lines.find(line => isMarkdownListLine(line)) || '';
+      const ordered = /^\s*\d+\.\s+/.test(first);
+      const list = document.createElement(ordered ? 'ol' : 'ul');
+      let lastItem = null;
+
+      for (const line of lines) {
+        const match = line.match(/^\s*(?:([-+*])|(\d+)\.)\s+(.+)$/);
+
+        if (!match) {
+          if (lastItem) {
+            lastItem.appendChild(document.createElement('br'));
+            appendPreviewInline(lastItem, line.trim());
+          }
+          continue;
+        }
+
+        const item = document.createElement('li');
+        let content = match[3];
+        const task = content.match(/^\[([ xX])\]\s+(.*)$/);
+
+        if (task) {
+          item.classList.add('tmn-live-task');
+
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.checked = task[1].toLowerCase() === 'x';
+          checkbox.disabled = true;
+          checkbox.tabIndex = -1;
+          item.appendChild(checkbox);
+          content = task[2];
+        }
+
+        appendPreviewInline(item, content);
+        list.appendChild(item);
+        lastItem = item;
+      }
+
+      container.appendChild(list);
+      return;
+    }
+
+    const paragraph = document.createElement('p');
+    appendPreviewLines(paragraph, raw.split('\n'));
+    container.appendChild(paragraph);
+  }
   // ===========================================================================
   // Herramientas Markdown
   // ===========================================================================
