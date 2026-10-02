@@ -32,7 +32,7 @@ No existe un OpenSpec compartido en la raíz: compartir repositorio no implica c
 - Mantiene ON/OFF y perfil seleccionado por conversación.
 
 
-### ChatGPT Markdown Notes v1.6.2
+### ChatGPT Markdown Notes v1.7.0
 
 
 - Panel lateral de notas Markdown persistente por conversación.
@@ -41,7 +41,9 @@ No existe un OpenSpec compartido en la raíz: compartir repositorio no implica c
 - Borrador persistente en IndexedDB.
 - Modos por conversación: **Libre**, **Cornell** y **Repaso**.
 - Libre, Cornell y Repaso operan sobre **una sola nota canónica**; Cornell se serializa a Markdown y Libre muestra/edita ese mismo contenido.
-- Toolbar Markdown en Libre y en los campos Markdown de Cornell: negrita, cursiva, H2/H3, listas, tareas, citas, código y enlaces.
+- Libre incluye un **asistente de estructura Cornell**: estado de compatibilidad, `Preparar Cornell`, `+ Cue / Pregunta`, acceso directo al resumen y una guía que evita tener que memorizar H1/H2/H3.
+- Las nuevas notas Cornell usan headings semánticos `### Cue: ...`; el parser mantiene compatibilidad con el formato numerado anterior.
+- Toolbar Markdown en Libre y en los campos Markdown de Cornell: negrita, cursiva, secciones/subsecciones, listas, tareas, citas, código y enlaces.
 - Cornell usa bloques `cue + notas`, resumen, layout responsive y exportación Markdown portable.
 - Repaso muestra un cue por vez y mantiene las notas ocultas hasta revelarlas.
 - El nombre del archivo es editable, obligatorio para guardar y se conserva por conversación.

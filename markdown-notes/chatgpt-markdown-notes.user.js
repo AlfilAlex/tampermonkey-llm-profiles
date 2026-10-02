@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.6.2
+// @version      1.7.0
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -217,14 +217,14 @@
       String(block.cue || '').trim() || String(block.notes || '').trim()
     );
 
-    blocks.forEach((block, index) => {
+    blocks.forEach(block => {
       const cue = String(block.cue || '')
         .replace(/\s+/g, ' ')
         .trim();
       const notes = String(block.notes || '').trim();
       const heading = cue || 'Nota';
 
-      lines.push(`### ${index + 1}. ${heading}`, '');
+      lines.push(`### Cue: ${heading}`, '');
 
       if (notes) {
         lines.push(notes, '');
@@ -245,8 +245,9 @@
     let fenceChar = '';
     let fenceLength = 0;
     let startIndex = -1;
-    let summaryIndex = -1;
-    const blockIndexes = [];
+    const summaryIndexes = [];
+    const semanticBlockIndexes = [];
+    const legacyBlockIndexes = [];
 
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index];
@@ -277,26 +278,49 @@
         continue;
       }
 
-      if (summaryIndex < 0 && trimmed === '## Summary') {
-        summaryIndex = index;
+      if (trimmed === '## Summary') {
+        summaryIndexes.push(index);
         continue;
       }
 
-      if (
-        summaryIndex < 0 &&
-        /^###\s+\d+\.\s+.+\s*$/.test(line)
-      ) {
-        blockIndexes.push(index);
+      if (/^###\s+Cue:\s*.+\s*$/i.test(line)) {
+        semanticBlockIndexes.push(index);
+        continue;
+      }
+
+      if (/^###\s+\d+\.\s+.+\s*$/.test(line)) {
+        legacyBlockIndexes.push(index);
       }
     }
 
-    return { startIndex, summaryIndex, blockIndexes };
+    const summaryIndex = summaryIndexes.length > 0
+      ? summaryIndexes[summaryIndexes.length - 1]
+      : -1;
+
+    const semantic = semanticBlockIndexes.filter(index =>
+      index > startIndex && (summaryIndex < 0 || index < summaryIndex)
+    );
+    const legacy = legacyBlockIndexes.filter(index =>
+      index > startIndex && (summaryIndex < 0 || index < summaryIndex)
+    );
+
+    return {
+      startIndex,
+      summaryIndex,
+      format: semantic.length > 0 ? 'semantic' : 'legacy',
+      blockIndexes: semantic.length > 0 ? semantic : legacy
+    };
   }
 
   function parseCornellBody(value) {
     const body = String(value || '').replace(/\r\n?/g, '\n');
     const lines = body.split('\n');
-    const { startIndex, summaryIndex, blockIndexes } = findCornellStructure(lines);
+    const {
+      startIndex,
+      summaryIndex,
+      format,
+      blockIndexes
+    } = findCornellStructure(lines);
 
     if (startIndex < 0 || summaryIndex <= startIndex) return null;
 
@@ -315,7 +339,10 @@
         ? blockIndexes[i + 1]
         : summaryIndex;
 
-      const heading = lines[absoluteStart].match(/^###\s+\d+\.\s+(.+?)\s*$/);
+      const heading = format === 'semantic'
+        ? lines[absoluteStart].match(/^###\s+Cue:\s*(.+?)\s*$/i)
+        : lines[absoluteStart].match(/^###\s+\d+\.\s+(.+?)\s*$/);
+
       if (!heading) return null;
 
       const label = heading[1].trim();
@@ -378,6 +405,165 @@
     }
 
     return false;
+  }
+
+  function analyzeCornellCompatibility(value = activeState?.body) {
+    const body = String(value || '');
+
+    if (!body.trim()) {
+      return {
+        state: 'empty',
+        blocks: 0,
+        parsed: null
+      };
+    }
+
+    const parsed = parseCornellBody(body);
+
+    if (parsed) {
+      return {
+        state: 'ready',
+        blocks: parsed.blocks.length,
+        parsed
+      };
+    }
+
+    return {
+      state: 'freeform',
+      blocks: 0,
+      parsed: null
+    };
+  }
+
+  function prepareCornellBody() {
+    if (!activeState) return null;
+
+    const analysis = analyzeCornellCompatibility(activeState.body);
+
+    if (analysis.state === 'ready') {
+      activeState.cornell = normalizeCornellState(analysis.parsed);
+      return activeState.cornell;
+    }
+
+    if (analysis.state === 'empty') {
+      activeState.cornell = normalizeCornellState(null);
+      activeState.body = '## Cornell Notes\n\n## Summary';
+      return activeState.cornell;
+    }
+
+    activeState.cornell = normalizeCornellState(
+      importBodyAsCornell(activeState.body)
+    );
+    activeState.body = serializeCornellBody(activeState.cornell);
+
+    return activeState.cornell;
+  }
+
+  function persistSemanticCornellEdit() {
+    renderEditor();
+    renderSaveButton();
+    updateStatus();
+    scheduleDraftPersistence();
+  }
+
+  function selectTextInFreeformEditor(text, fromEnd = false) {
+    const editor = panel?.querySelector('.tmn-editor');
+    if (!editor) return false;
+
+    const value = editor.value;
+    const index = fromEnd ? value.lastIndexOf(text) : value.indexOf(text);
+    if (index < 0) return false;
+
+    editor.focus();
+    editor.setSelectionRange(index, index + text.length);
+    rememberMarkdownSelection(editor);
+    return true;
+  }
+
+  function prepareCornellFromLibre() {
+    if (!activeState || activeState.noteMode !== 'freeform') return;
+
+    const before = activeState.body;
+    prepareCornellBody();
+    persistSemanticCornellEdit();
+
+    requestAnimationFrame(() => {
+      const editor = panel?.querySelector('.tmn-editor');
+      editor?.focus();
+
+      if (!before.trim()) {
+        const summaryMarker = '## Summary';
+        const summaryIndex = editor?.value.indexOf(summaryMarker) ?? -1;
+
+        if (editor && summaryIndex >= 0) {
+          const caret = Math.max(0, summaryIndex - 1);
+          editor.setSelectionRange(caret, caret);
+          rememberMarkdownSelection(editor);
+        }
+      }
+    });
+  }
+
+  function addCornellCueFromLibre() {
+    if (!activeState || activeState.noteMode !== 'freeform') return;
+
+    prepareCornellBody();
+
+    const parsed = parseCornellBody(activeState.body);
+    if (!parsed) {
+      setStatus('No se pudo preparar una estructura Cornell válida.', 'error');
+      return;
+    }
+
+    parsed.blocks.push(createCornellBlock({
+      cue: 'Pregunta o concepto',
+      notes: ''
+    }));
+
+    activeState.cornell = normalizeCornellState(parsed);
+    activeState.body = serializeCornellBody(activeState.cornell);
+    persistSemanticCornellEdit();
+
+    requestAnimationFrame(() => {
+      selectTextInFreeformEditor('Pregunta o concepto', true);
+    });
+  }
+
+  function goToCornellSummaryFromLibre() {
+    if (!activeState || activeState.noteMode !== 'freeform') return;
+
+    prepareCornellBody();
+
+    const parsed = parseCornellBody(activeState.body);
+    if (!parsed) {
+      setStatus('No se pudo preparar una estructura Cornell válida.', 'error');
+      return;
+    }
+
+    activeState.cornell = normalizeCornellState(parsed);
+    activeState.body = serializeCornellBody(activeState.cornell);
+    persistSemanticCornellEdit();
+
+    requestAnimationFrame(() => {
+      const editor = panel?.querySelector('.tmn-editor');
+      if (!editor) return;
+
+      const marker = '## Summary';
+      const markerIndex = editor.value.indexOf(marker);
+      if (markerIndex < 0) return;
+
+      let caret = markerIndex + marker.length;
+
+      if (editor.value.slice(caret, caret + 2) === '\n\n') {
+        caret += 2;
+      } else if (editor.value[caret] === '\n') {
+        caret += 1;
+      }
+
+      editor.focus();
+      editor.setSelectionRange(caret, caret);
+      rememberMarkdownSelection(editor);
+    });
   }
 
   function createNoteId() {
@@ -539,6 +725,21 @@
     if (!activeState || !['freeform', 'cornell', 'review'].includes(mode)) return;
     if (activeState.noteMode === mode) return;
 
+    if (
+      activeState.noteMode === 'freeform' &&
+      (mode === 'cornell' || mode === 'review')
+    ) {
+      const compatibility = analyzeCornellCompatibility(activeState.body);
+
+      if (compatibility.state === 'freeform') {
+        setStatus(
+          'Esta nota sigue en formato libre. Usa “Preparar Cornell” para convertirla sin perder contenido.'
+        );
+        renderCornellStructureAssistant({ emphasize: true });
+        return;
+      }
+    }
+
     if (activeState.noteMode === 'cornell') {
       syncBodyFromCornell();
     }
@@ -567,6 +768,29 @@
 
     const block = createCornellBlock();
     activeState.cornell.blocks.push(block);
+    syncBodyFromCornell();
+    renderCornellEditor();
+    renderSaveButton();
+    updateStatus();
+    scheduleDraftPersistence();
+
+    requestAnimationFrame(() => {
+      panel?.querySelector(
+        `.tmn-cornell-block[data-block-id="${CSS.escape(block.id)}"] .tmn-cue-editor`
+      )?.focus();
+    });
+  }
+
+  function insertCornellBlockAfter(blockId) {
+    if (!activeState?.cornell) return;
+
+    const blocks = activeState.cornell.blocks;
+    const index = blocks.findIndex(block => block.id === blockId);
+    if (index < 0) return;
+
+    const block = createCornellBlock();
+    blocks.splice(index + 1, 0, block);
+
     syncBodyFromCornell();
     renderCornellEditor();
     renderSaveButton();
@@ -611,16 +835,6 @@
     const index = activeState.cornell.blocks.findIndex(block => block.id === blockId);
     if (index < 0) return;
 
-    const block = activeState.cornell.blocks[index];
-    const hasContent = String(block.cue || '').trim() || String(block.notes || '').trim();
-
-    if (
-      hasContent &&
-      !window.confirm('¿Eliminar este bloque Cornell? Esta acción elimina el bloque del borrador local.')
-    ) {
-      return;
-    }
-
     activeState.cornell.blocks.splice(index, 1);
     syncBodyFromCornell();
     renderCornellEditor();
@@ -639,6 +853,42 @@
         panel?.querySelector('.tmn-add-block')?.focus();
       }
     });
+  }
+
+  function resetCornellDeleteButton(button, blockIndex) {
+    if (!(button instanceof HTMLButtonElement)) return;
+
+    button.dataset.confirmDelete = '0';
+    button.textContent = 'Eliminar';
+    button.classList.remove('tmn-delete-confirm');
+    button.setAttribute('aria-label', `Eliminar bloque ${blockIndex + 1}`);
+    button.title = `Eliminar bloque ${blockIndex + 1}`;
+  }
+
+  function confirmCornellBlockDelete(button, blockId) {
+    if (!(button instanceof HTMLButtonElement) || !activeState?.cornell) return;
+
+    const blockIndex = activeState.cornell.blocks.findIndex(block => block.id === blockId);
+    if (blockIndex < 0) return;
+
+    if (button.dataset.confirmDelete === '1') {
+      deleteCornellBlock(blockId);
+      return;
+    }
+
+    button.dataset.confirmDelete = '1';
+    button.textContent = 'Confirmar';
+    button.classList.add('tmn-delete-confirm');
+    button.setAttribute(
+      'aria-label',
+      `Confirmar eliminación del bloque ${blockIndex + 1}`
+    );
+    button.title = 'Pulsa otra vez para eliminar este bloque';
+
+    window.setTimeout(() => {
+      if (!button.isConnected || button.dataset.confirmDelete !== '1') return;
+      resetCornellDeleteButton(button, blockIndex);
+    }, 3000);
   }
 
   function currentNoteTitle() {
@@ -1125,6 +1375,46 @@
     toolbar.hidden = activeState.noteMode === 'review';
   }
 
+  function renderCornellStructureAssistant({ emphasize = false } = {}) {
+    if (!panel || !activeState) return;
+
+    const assistant = panel.querySelector('.tmn-cornell-assist');
+    if (!assistant) return;
+
+    const visible = activeState.noteMode === 'freeform';
+    assistant.hidden = !visible;
+
+    if (!visible) {
+      assistant.classList.remove('tmn-attention');
+      return;
+    }
+
+    const status = assistant.querySelector('.tmn-cornell-assist-status');
+    const prepare = assistant.querySelector('[data-cornell-assist-action="prepare"]');
+    const analysis = analyzeCornellCompatibility(activeState.body);
+
+    assistant.dataset.state = analysis.state;
+
+    if (analysis.state === 'ready') {
+      status.textContent = `Cornell listo · ${analysis.blocks} ${analysis.blocks === 1 ? 'bloque' : 'bloques'}`;
+      prepare.hidden = true;
+    } else if (analysis.state === 'empty') {
+      status.textContent = 'Libre vacío';
+      prepare.hidden = false;
+    } else {
+      status.textContent = 'Libre · sin estructura Cornell';
+      prepare.hidden = false;
+    }
+
+    if (emphasize) {
+      assistant.classList.add('tmn-attention');
+
+      window.setTimeout(() => {
+        assistant.classList.remove('tmn-attention');
+      }, 1600);
+    }
+  }
+
   // ===========================================================================
   // UI
   // ===========================================================================
@@ -1343,6 +1633,76 @@
         min-width: 44px;
       }
 
+      #${APP}-panel .tmn-cornell-assist {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 7px 10px;
+        border-bottom: 1px solid rgba(127,127,127,.18);
+        background: rgba(0,0,0,.035);
+        transition: box-shadow .16s ease, background .16s ease;
+      }
+
+      #${APP}-panel .tmn-cornell-assist[hidden] {
+        display: none !important;
+      }
+
+      #${APP}-panel .tmn-cornell-assist.tmn-attention {
+        background: rgba(255,255,255,.075);
+        box-shadow: inset 0 0 0 1px rgba(220,220,220,.28);
+      }
+
+      #${APP}-panel .tmn-cornell-assist-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 5px;
+      }
+
+      #${APP}-panel .tmn-cornell-assist-status {
+        flex: 1 1 145px;
+        min-width: 0;
+        font-size: 11px;
+        font-weight: 700;
+        opacity: .82;
+      }
+
+      #${APP}-panel .tmn-cornell-assist-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+      }
+
+      #${APP}-panel .tmn-cornell-assist button {
+        min-height: 27px;
+        padding: 0 7px;
+        border-radius: 7px;
+        font-size: 10.5px;
+      }
+
+      #${APP}-panel .tmn-cornell-assist details {
+        width: 100%;
+        font-size: 10.5px;
+        line-height: 1.45;
+        opacity: .76;
+      }
+
+      #${APP}-panel .tmn-cornell-assist summary {
+        cursor: pointer;
+        user-select: none;
+      }
+
+      #${APP}-panel .tmn-cornell-assist-help {
+        margin-top: 5px;
+        padding: 7px 8px;
+        border-radius: 7px;
+        background: rgba(0,0,0,.12);
+      }
+
+      #${APP}-panel .tmn-cornell-assist-help strong {
+        opacity: .95;
+      }
+
       #${APP}-panel .tmn-editor-wrap {
         min-height: 0;
         flex: 1;
@@ -1436,6 +1796,12 @@
         min-width: 30px;
         min-height: 28px;
         padding: 0 7px;
+      }
+
+      #${APP}-panel .tmn-cornell-actions .tmn-delete-confirm {
+        font-weight: 700;
+        box-shadow: inset 0 0 0 1px rgba(220,220,220,.34);
+        background: rgba(255,255,255,.08);
       }
 
       #${APP}-panel .tmn-cornell-grid {
@@ -1666,8 +2032,8 @@
       <div class="tmn-markdown-toolbar" role="toolbar" aria-label="Formato Markdown">
         <button type="button" data-md-action="bold" aria-label="Negrita" title="Negrita (Ctrl/Cmd+B)"><strong>B</strong></button>
         <button type="button" data-md-action="italic" aria-label="Cursiva" title="Cursiva (Ctrl/Cmd+I)"><em>I</em></button>
-        <button type="button" data-md-action="h2" aria-label="Encabezado nivel 2" title="Encabezado H2">H2</button>
-        <button type="button" data-md-action="h3" aria-label="Encabezado nivel 3" title="Encabezado H3">H3</button>
+        <button type="button" class="tmn-md-wide" data-md-action="h2" aria-label="Sección Markdown nivel 2" title="Sección Markdown (H2) · formato libre, no necesario para Cornell">Sección</button>
+        <button type="button" class="tmn-md-wide" data-md-action="h3" aria-label="Subsección Markdown nivel 3" title="Subsección Markdown (H3) · formato libre, no necesario para Cornell">Subsec.</button>
         <button type="button" data-md-action="bullet" aria-label="Lista con viñetas" title="Lista con viñetas">•</button>
         <button type="button" data-md-action="ordered" aria-label="Lista numerada" title="Lista numerada">1.</button>
         <button type="button" data-md-action="task" aria-label="Lista de tareas" title="Lista de tareas">☐</button>
@@ -1675,6 +2041,27 @@
         <button type="button" data-md-action="inlineCode" aria-label="Código inline" title="Código inline">&lt;/&gt;</button>
         <button type="button" class="tmn-md-wide" data-md-action="codeBlock" aria-label="Bloque de código" title="Bloque de código">Code</button>
         <button type="button" class="tmn-md-wide" data-md-action="link" aria-label="Enlace" title="Enlace (Ctrl/Cmd+K)">Link</button>
+      </div>
+
+      <div class="tmn-cornell-assist" aria-label="Estructura Cornell" hidden>
+        <div class="tmn-cornell-assist-row">
+          <div class="tmn-cornell-assist-status">Libre vacío</div>
+          <div class="tmn-cornell-assist-actions">
+            <button type="button" data-cornell-assist-action="prepare">Preparar Cornell</button>
+            <button type="button" data-cornell-assist-action="cue">+ Cue / Pregunta</button>
+            <button type="button" data-cornell-assist-action="summary">Ir a resumen</button>
+          </div>
+        </div>
+        <details>
+          <summary>¿Cómo se relaciona Libre con Cornell?</summary>
+          <div class="tmn-cornell-assist-help">
+            <div><strong>Título / archivo:</strong> lo defines arriba; no necesitas escribir H1 en la nota.</div>
+            <div><strong>Cue / Pregunta:</strong> crea un bloque Cornell.</div>
+            <div><strong>Texto debajo:</strong> son las notas de ese cue.</div>
+            <div><strong>Resumen:</strong> es la síntesis final de la nota.</div>
+            <div><strong>Sección / Subsec.:</strong> son H2/H3 Markdown normales. No necesitas usarlos para convertir a Cornell.</div>
+          </div>
+        </details>
       </div>
 
       <div class="tmn-editor-wrap">
@@ -1791,6 +2178,20 @@
       applyMarkdownAction(button.dataset.mdAction);
     });
 
+    panel.querySelector('.tmn-cornell-assist').addEventListener('click', event => {
+      const button = event.target instanceof Element
+        ? event.target.closest('button[data-cornell-assist-action]')
+        : null;
+
+      if (!button) return;
+
+      const action = button.dataset.cornellAssistAction;
+
+      if (action === 'prepare') prepareCornellFromLibre();
+      else if (action === 'cue') addCornellCueFromLibre();
+      else if (action === 'summary') goToCornellSummaryFromLibre();
+    });
+
     const rememberSelectionFromEvent = event => {
       if (isMarkdownTextarea(event.target)) {
         rememberMarkdownSelection(event.target);
@@ -1832,7 +2233,8 @@
 
       if (button.dataset.action === 'up') moveCornellBlock(blockId, -1);
       else if (button.dataset.action === 'down') moveCornellBlock(blockId, 1);
-      else if (button.dataset.action === 'delete') deleteCornellBlock(blockId);
+      else if (button.dataset.action === 'addAfter') insertCornellBlockAfter(blockId);
+      else if (button.dataset.action === 'delete') confirmCornellBlockDelete(button, blockId);
     });
 
     panel.querySelector('.tmn-summary-editor').addEventListener('input', event => {
@@ -1896,6 +2298,7 @@
       // obsoleta hasta que el Markdown vuelva a parsearse al entrar a Cornell.
       activeState.cornell = normalizeCornellState(null);
 
+      renderCornellStructureAssistant();
       renderSaveButton();
       updateStatus();
       scheduleDraftPersistence();
@@ -2099,6 +2502,7 @@
       const actionDefs = [
         ['up', '↑', `Mover bloque ${index + 1} arriba`, index === 0],
         ['down', '↓', `Mover bloque ${index + 1} abajo`, index === activeState.cornell.blocks.length - 1],
+        ['addAfter', '+', `Añadir bloque después del bloque ${index + 1}`, false],
         ['delete', 'Eliminar', `Eliminar bloque ${index + 1}`, false]
       ];
 
@@ -2221,6 +2625,7 @@
     if (!panel || !activeState) return;
 
     renderMarkdownToolbar();
+    renderCornellStructureAssistant();
 
     const editor = panel.querySelector('.tmn-editor');
     const cornell = panel.querySelector('.tmn-cornell-editor');
@@ -2528,7 +2933,7 @@
 
       setPanelWidth(currentWidth, false);
     });
-    console.info('[ChatGPT Markdown Notes] v1.6.2 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.7.0 cargado');
   }
 
   bootstrap().catch(error => {
