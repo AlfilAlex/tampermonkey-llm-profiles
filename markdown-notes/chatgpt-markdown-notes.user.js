@@ -2876,7 +2876,7 @@
 
       setPanelWidth(currentWidth, false);
     });
-    console.info('[ChatGPT Markdown Notes] v1.6.2 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.7.0 cargado');
   }
 
   bootstrap().catch(error => {
