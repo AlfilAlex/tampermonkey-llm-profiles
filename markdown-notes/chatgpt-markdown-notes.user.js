@@ -515,6 +515,9 @@
   function prepareCornellFromLibre() {
     if (!activeState || activeState.noteMode !== 'freeform') return;
 
+    liveActiveBlock = null;
+    markdownSelection = null;
+
     const before = activeState.body;
     prepareCornellBody();
     persistSemanticCornellEdit();
@@ -544,6 +547,9 @@
   function addCornellCueFromLibre() {
     if (!activeState || activeState.noteMode !== 'freeform') return;
 
+    liveActiveBlock = null;
+    markdownSelection = null;
+
     prepareCornellBody();
 
     const parsed = parseCornellBody(activeState.body);
@@ -568,6 +574,9 @@
 
   function goToCornellSummaryFromLibre() {
     if (!activeState || activeState.noteMode !== 'freeform') return;
+
+    liveActiveBlock = null;
+    markdownSelection = null;
 
     prepareCornellBody();
 
