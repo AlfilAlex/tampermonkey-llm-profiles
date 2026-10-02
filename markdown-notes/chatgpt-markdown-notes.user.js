@@ -1508,6 +1508,185 @@
     appendPreviewLines(paragraph, raw.split('\n'));
     container.appendChild(paragraph);
   }
+  function resizeLiveBlockEditor(editor) {
+    if (!(editor instanceof HTMLTextAreaElement)) return;
+
+    editor.style.height = 'auto';
+    editor.style.height = Math.max(72, editor.scrollHeight) + 'px';
+  }
+
+  function activateLivePreviewBlock(start, end) {
+    if (!activeState || freeformView !== 'live') return;
+
+    liveActiveBlock = { start, end };
+    markdownSelection = null;
+    renderLivePreview();
+    renderMarkdownToolbar();
+
+    requestAnimationFrame(() => {
+      const editor = panel?.querySelector('.tmn-live-block-editor');
+      if (!editor) return;
+
+      editor.focus();
+      editor.setSelectionRange(editor.value.length, editor.value.length);
+      rememberMarkdownSelection(editor);
+      resizeLiveBlockEditor(editor);
+      renderMarkdownToolbar();
+    });
+  }
+
+  function deactivateLivePreviewBlock() {
+    if (!liveActiveBlock) return;
+
+    liveActiveBlock = null;
+    markdownSelection = null;
+    renderLivePreview();
+    renderMarkdownToolbar();
+  }
+
+  function updateBodyFromLiveBlock(editor) {
+    if (
+      !(editor instanceof HTMLTextAreaElement) ||
+      !activeState ||
+      !liveActiveBlock
+    ) {
+      return;
+    }
+
+    const start = liveActiveBlock.start;
+    const end = liveActiveBlock.end;
+    const replacement = editor.value;
+
+    activeState.body =
+      activeState.body.slice(0, start) +
+      replacement +
+      activeState.body.slice(end);
+
+    liveActiveBlock.end = start + replacement.length;
+    activeState.cornell = normalizeCornellState(null);
+
+    rememberMarkdownSelection(editor);
+    resizeLiveBlockEditor(editor);
+    renderCornellStructureAssistant();
+    renderSaveButton();
+    updateStatus();
+    scheduleDraftPersistence();
+  }
+
+  function setFreeformView(view) {
+    if (!['live', 'source'].includes(view)) return;
+    if (freeformView === view) return;
+
+    liveActiveBlock = null;
+    markdownSelection = null;
+    freeformView = view;
+    renderEditor();
+
+    requestAnimationFrame(() => {
+      if (freeformView === 'source') {
+        panel?.querySelector('.tmn-editor')?.focus();
+      }
+    });
+  }
+
+  function renderFreeformViewSwitch() {
+    if (!panel || !activeState) return;
+
+    const switcher = panel.querySelector('.tmn-freeform-view-switch');
+    if (!switcher) return;
+
+    switcher.hidden = activeState.noteMode !== 'freeform';
+
+    for (const button of switcher.querySelectorAll('button[data-freeform-view]')) {
+      button.setAttribute(
+        'aria-selected',
+        String(button.dataset.freeformView === freeformView)
+      );
+    }
+  }
+
+  function renderLivePreview() {
+    if (!panel || !activeState) return;
+
+    const container = panel.querySelector('.tmn-live-preview');
+    if (!container) return;
+
+    container.replaceChildren();
+
+    if (!activeState.body) {
+      const empty = document.createElement('button');
+      empty.type = 'button';
+      empty.className = 'tmn-live-empty';
+      empty.textContent = 'Empieza a escribir tu nota…';
+      empty.addEventListener('click', () => {
+        setFreeformView('source');
+      });
+      container.appendChild(empty);
+      return;
+    }
+
+    const blocks = parseMarkdownPreviewBlocks(activeState.body);
+
+    for (const block of blocks) {
+      const article = document.createElement('article');
+      article.className = 'tmn-live-block tmn-live-block-' + block.type;
+      article.dataset.start = String(block.start);
+      article.dataset.end = String(block.end);
+
+      const isActive = liveActiveBlock?.start === block.start;
+
+      if (isActive) {
+        const editor = document.createElement('textarea');
+        editor.className = 'tmn-live-block-editor';
+        editor.spellcheck = false;
+        editor.value = activeState.body.slice(
+          liveActiveBlock.start,
+          liveActiveBlock.end
+        );
+
+        editor.addEventListener('input', () => {
+          updateBodyFromLiveBlock(editor);
+        });
+
+        editor.addEventListener('keydown', event => {
+          if (event.key !== 'Escape') return;
+
+          event.preventDefault();
+          deactivateLivePreviewBlock();
+        });
+
+        editor.addEventListener('blur', () => {
+          window.setTimeout(() => {
+            if (!editor.isConnected) return;
+            if (document.activeElement === editor) return;
+            deactivateLivePreviewBlock();
+          }, 0);
+        });
+
+        article.classList.add('tmn-live-block-active');
+        article.appendChild(editor);
+      } else {
+        article.tabIndex = 0;
+        article.setAttribute('aria-label', 'Editar bloque Markdown');
+        renderMarkdownPreviewBlockContent(article, block);
+
+        article.addEventListener('click', event => {
+          if (event.target instanceof HTMLAnchorElement) return;
+          activateLivePreviewBlock(block.start, block.end);
+        });
+
+        article.addEventListener('keydown', event => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          if (event.target !== article) return;
+
+          event.preventDefault();
+          activateLivePreviewBlock(block.start, block.end);
+        });
+      }
+
+      container.appendChild(article);
+    }
+  }
   // ===========================================================================
   // Herramientas Markdown
   // ===========================================================================
