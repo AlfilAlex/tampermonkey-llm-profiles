@@ -698,6 +698,21 @@
     if (!activeState || !['freeform', 'cornell', 'review'].includes(mode)) return;
     if (activeState.noteMode === mode) return;
 
+    if (
+      activeState.noteMode === 'freeform' &&
+      (mode === 'cornell' || mode === 'review')
+    ) {
+      const compatibility = analyzeCornellCompatibility(activeState.body);
+
+      if (compatibility.state === 'freeform') {
+        setStatus(
+          'Esta nota sigue en formato libre. Usa “Preparar Cornell” para convertirla sin perder contenido.'
+        );
+        renderCornellStructureAssistant({ emphasize: true });
+        return;
+      }
+    }
+
     if (activeState.noteMode === 'cornell') {
       syncBodyFromCornell();
     }
