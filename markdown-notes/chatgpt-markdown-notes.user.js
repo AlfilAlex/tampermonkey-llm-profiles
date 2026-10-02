@@ -1096,6 +1096,177 @@
   }
 
   // ===========================================================================
+  // Live Preview Markdown
+  // ===========================================================================
+
+  function markdownLinesWithOffsets(value) {
+    const text = String(value || '');
+    if (!text) return [];
+
+    const lines = [];
+    let start = 0;
+
+    for (let index = 0; index <= text.length; index += 1) {
+      if (index !== text.length && text[index] !== '\n') continue;
+
+      lines.push({
+        text: text.slice(start, index),
+        start,
+        end: index
+      });
+
+      start = index + 1;
+    }
+
+    return lines;
+  }
+
+  function markdownFenceStart(line) {
+    return String(line || '').match(/^\s*(`{3,}|~{3,})(.*)$/);
+  }
+
+  function isClosingMarkdownFence(line, fenceChar, fenceLength) {
+    const text = String(line || '').trim();
+    if (!text || text[0] !== fenceChar) return false;
+
+    let count = 0;
+    while (text[count] === fenceChar) count += 1;
+
+    return count >= fenceLength && !text.slice(count).trim();
+  }
+
+  function isMarkdownHeadingLine(line) {
+    return /^\s{0,3}#{1,6}\s+\S/.test(String(line || ''));
+  }
+
+  function isMarkdownHorizontalRule(line) {
+    return /^\s{0,3}((\*\s*){3,}|(-\s*){3,}|(_\s*){3,})$/.test(String(line || ''));
+  }
+
+  function isMarkdownListLine(line) {
+    return /^\s*(?:[-+*]|\d+\.)\s+\S/.test(String(line || ''));
+  }
+
+  function isMarkdownQuoteLine(line) {
+    return /^\s*>/.test(String(line || ''));
+  }
+
+  function isMarkdownStructuralStart(line) {
+    return Boolean(
+      markdownFenceStart(line) ||
+      isMarkdownHeadingLine(line) ||
+      isMarkdownHorizontalRule(line) ||
+      isMarkdownListLine(line) ||
+      isMarkdownQuoteLine(line)
+    );
+  }
+
+  function parseMarkdownPreviewBlocks(value) {
+    const body = String(value || '');
+    const lines = markdownLinesWithOffsets(body);
+    const blocks = [];
+    let index = 0;
+
+    while (index < lines.length) {
+      const line = lines[index];
+
+      if (!line.text.trim()) {
+        index += 1;
+        continue;
+      }
+
+      const start = line.start;
+      const fence = markdownFenceStart(line.text);
+
+      if (fence) {
+        const fenceChar = fence[1][0];
+        const fenceLength = fence[1].length;
+        let endIndex = index;
+
+        for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+          endIndex = cursor;
+
+          if (isClosingMarkdownFence(lines[cursor].text, fenceChar, fenceLength)) {
+            break;
+          }
+        }
+
+        const end = lines[endIndex].end;
+        blocks.push({ start, end, type: 'code', raw: body.slice(start, end) });
+        index = endIndex + 1;
+        continue;
+      }
+
+      if (isMarkdownHeadingLine(line.text)) {
+        blocks.push({ start, end: line.end, type: 'heading', raw: body.slice(start, line.end) });
+        index += 1;
+        continue;
+      }
+
+      if (isMarkdownHorizontalRule(line.text)) {
+        blocks.push({ start, end: line.end, type: 'hr', raw: body.slice(start, line.end) });
+        index += 1;
+        continue;
+      }
+
+      if (isMarkdownQuoteLine(line.text)) {
+        let endIndex = index;
+
+        while (
+          endIndex + 1 < lines.length &&
+          lines[endIndex + 1].text.trim() &&
+          isMarkdownQuoteLine(lines[endIndex + 1].text)
+        ) {
+          endIndex += 1;
+        }
+
+        const end = lines[endIndex].end;
+        blocks.push({ start, end, type: 'quote', raw: body.slice(start, end) });
+        index = endIndex + 1;
+        continue;
+      }
+
+      if (isMarkdownListLine(line.text)) {
+        let endIndex = index;
+
+        while (endIndex + 1 < lines.length) {
+          const next = lines[endIndex + 1].text;
+
+          if (!next.trim()) break;
+          if (
+            isMarkdownHeadingLine(next) ||
+            markdownFenceStart(next) ||
+            isMarkdownHorizontalRule(next) ||
+            isMarkdownQuoteLine(next)
+          ) {
+            break;
+          }
+
+          endIndex += 1;
+        }
+
+        const end = lines[endIndex].end;
+        blocks.push({ start, end, type: 'list', raw: body.slice(start, end) });
+        index = endIndex + 1;
+        continue;
+      }
+
+      let endIndex = index;
+
+      while (endIndex + 1 < lines.length) {
+        const next = lines[endIndex + 1].text;
+        if (!next.trim() || isMarkdownStructuralStart(next)) break;
+        endIndex += 1;
+      }
+
+      const end = lines[endIndex].end;
+      blocks.push({ start, end, type: 'paragraph', raw: body.slice(start, end) });
+      index = endIndex + 1;
+    }
+
+    return blocks;
+  }
+  // ===========================================================================
   // Herramientas Markdown
   // ===========================================================================
 
