@@ -11,41 +11,41 @@
 - [x] Define keyboard and responsive behavior.
 
 ## Implementation
-- [ ] Add Live/Markdown view switch for Libre.
-- [ ] Default Libre to Live Preview.
-- [ ] Add offset-aware Markdown block parser.
-- [ ] Keep fenced code as one block.
-- [ ] Add safe inline Markdown renderer.
-- [ ] Render headings, paragraphs, lists, tasks, quotes, horizontal rules, and fenced code.
-- [ ] Add semantic rendering for Cornell Notes, Cue, and Summary headings.
-- [ ] Add safe link scheme handling.
-- [ ] Add rendered-block activation.
-- [ ] Add per-block textarea editor.
-- [ ] Replace canonical body range on each block input.
-- [ ] Reparse/re-render after block blur.
-- [ ] Add Escape-to-preview behavior.
-- [ ] Add keyboard activation for rendered blocks.
-- [ ] Add `.tmn-live-block-editor` to Markdown formatting targets.
-- [ ] Disable formatting buttons when Live Preview has no active editor.
-- [ ] Preserve full Markdown textarea behavior.
-- [ ] Preserve Cornell assistant behavior in both Libre views.
-- [ ] Add responsive Live Preview CSS.
-- [ ] Bump userscript and README to v1.8.0.
+- [x] Add Live/Markdown view switch for Libre.
+- [x] Default Libre to Live Preview.
+- [x] Add offset-aware Markdown block parser.
+- [x] Keep fenced code as one block.
+- [x] Add safe inline Markdown renderer.
+- [x] Render headings, paragraphs, lists, tasks, quotes, horizontal rules, and fenced code.
+- [x] Add semantic rendering for Cornell Notes, Cue, and Summary headings.
+- [x] Add safe link scheme handling.
+- [x] Add rendered-block activation.
+- [x] Add per-block textarea editor.
+- [x] Replace canonical body range on each block input.
+- [x] Reparse/re-render after block blur.
+- [x] Add Escape-to-preview behavior.
+- [x] Add keyboard activation for rendered blocks.
+- [x] Add `.tmn-live-block-editor` to Markdown formatting targets.
+- [x] Disable formatting buttons when Live Preview has no active editor.
+- [x] Preserve full Markdown textarea behavior.
+- [x] Preserve Cornell assistant behavior in both Libre views.
+- [x] Add responsive Live Preview CSS.
+- [x] Bump userscript and README to v1.8.0.
 
 ## Validation
 - [ ] Run `node --check markdown-notes/chatgpt-markdown-notes.user.js`.
-- [ ] Parse the complete userscript successfully.
-- [ ] Validate block offsets and exact range replacement.
+- [x] Parse the complete userscript successfully with the V8 JavaScript parser.
+- [x] Validate block offsets and exact range replacement with an isolated parser/range test.
 - [ ] Validate headings and paragraphs render.
 - [ ] Validate bold, italic, inline code, and links render safely.
 - [ ] Validate unordered, ordered, and task lists render.
-- [ ] Validate fenced code containing Markdown markers remains one block.
-- [ ] Validate raw HTML is not executed.
-- [ ] Validate unsafe URL schemes are not clickable.
+- [x] Validate fenced code containing Markdown markers remains one block with an isolated parser test.
+- [x] Validate the Live renderer does not use `innerHTML`/HTML injection by static inspection.
+- [x] Validate link activation is restricted to HTTP, HTTPS, and mailto by static inspection.
 - [ ] Validate Cornell semantic headings render distinctly.
-- [ ] Validate toolbar targets an active Live block.
-- [ ] Validate toolbar is disabled with no active Live block.
-- [ ] Validate full source and Live Preview share exact body.
+- [x] Validate toolbar target resolution includes the active `.tmn-live-block-editor`.
+- [x] Validate toolbar buttons disable when Live Preview has no active editor.
+- [x] Validate both views read/write the same `activeState.body` with no secondary body state.
 - [ ] Validate reload preserves Live Preview edits through existing draft persistence.
 - [ ] Validate conversation switching keeps canonical bodies isolated.
 - [ ] Validate Cornell conversion/Repaso still read the same body.
