@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.7.0
+// @version      1.8.1
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
+// @updateURL    https://raw.githubusercontent.com/AlfilAlex/tampermonkey-llm-profiles/master/markdown-notes/chatgpt-markdown-notes.user.js
+// @downloadURL  https://raw.githubusercontent.com/AlfilAlex/tampermonkey-llm-profiles/master/markdown-notes/chatgpt-markdown-notes.user.js
 // @run-at       document-idle
 // @grant        none
 // ==/UserScript==
@@ -2933,7 +2935,7 @@
 
       setPanelWidth(currentWidth, false);
     });
-    console.info('[ChatGPT Markdown Notes] v1.7.0 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.8.1 cargado');
   }
 
   bootstrap().catch(error => {
