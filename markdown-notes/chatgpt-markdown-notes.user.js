@@ -781,6 +781,29 @@
     });
   }
 
+  function insertCornellBlockAfter(blockId) {
+    if (!activeState?.cornell) return;
+
+    const blocks = activeState.cornell.blocks;
+    const index = blocks.findIndex(block => block.id === blockId);
+    if (index < 0) return;
+
+    const block = createCornellBlock();
+    blocks.splice(index + 1, 0, block);
+
+    syncBodyFromCornell();
+    renderCornellEditor();
+    renderSaveButton();
+    updateStatus();
+    scheduleDraftPersistence();
+
+    requestAnimationFrame(() => {
+      panel?.querySelector(
+        `.tmn-cornell-block[data-block-id="${CSS.escape(block.id)}"] .tmn-cue-editor`
+      )?.focus();
+    });
+  }
+
   function moveCornellBlock(blockId, delta) {
     if (!activeState?.cornell) return;
 
@@ -812,16 +835,6 @@
     const index = activeState.cornell.blocks.findIndex(block => block.id === blockId);
     if (index < 0) return;
 
-    const block = activeState.cornell.blocks[index];
-    const hasContent = String(block.cue || '').trim() || String(block.notes || '').trim();
-
-    if (
-      hasContent &&
-      !window.confirm('¿Eliminar este bloque Cornell? Esta acción elimina el bloque del borrador local.')
-    ) {
-      return;
-    }
-
     activeState.cornell.blocks.splice(index, 1);
     syncBodyFromCornell();
     renderCornellEditor();
@@ -840,6 +853,42 @@
         panel?.querySelector('.tmn-add-block')?.focus();
       }
     });
+  }
+
+  function resetCornellDeleteButton(button, blockIndex) {
+    if (!(button instanceof HTMLButtonElement)) return;
+
+    button.dataset.confirmDelete = '0';
+    button.textContent = 'Eliminar';
+    button.classList.remove('tmn-delete-confirm');
+    button.setAttribute('aria-label', `Eliminar bloque ${blockIndex + 1}`);
+    button.title = `Eliminar bloque ${blockIndex + 1}`;
+  }
+
+  function confirmCornellBlockDelete(button, blockId) {
+    if (!(button instanceof HTMLButtonElement) || !activeState?.cornell) return;
+
+    const blockIndex = activeState.cornell.blocks.findIndex(block => block.id === blockId);
+    if (blockIndex < 0) return;
+
+    if (button.dataset.confirmDelete === '1') {
+      deleteCornellBlock(blockId);
+      return;
+    }
+
+    button.dataset.confirmDelete = '1';
+    button.textContent = 'Confirmar';
+    button.classList.add('tmn-delete-confirm');
+    button.setAttribute(
+      'aria-label',
+      `Confirmar eliminación del bloque ${blockIndex + 1}`
+    );
+    button.title = 'Pulsa otra vez para eliminar este bloque';
+
+    window.setTimeout(() => {
+      if (!button.isConnected || button.dataset.confirmDelete !== '1') return;
+      resetCornellDeleteButton(button, blockIndex);
+    }, 3000);
   }
 
   function currentNoteTitle() {
