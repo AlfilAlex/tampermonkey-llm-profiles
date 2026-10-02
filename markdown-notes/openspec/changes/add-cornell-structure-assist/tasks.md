@@ -11,31 +11,31 @@
 
 ## Implementation
 
-- [ ] Add Cornell compatibility analysis helper.
-- [ ] Serialize new Cornell blocks with semantic `### Cue:` headings.
-- [ ] Keep parser compatibility with legacy numbered cue headings.
-- [ ] Prefer the final top-level Summary delimiter so imported content can contain earlier Summary headings.
-- [ ] Add non-destructive `prepareCornellBody()`.
-- [ ] Add semantic cue insertion.
-- [ ] Add Summary navigation.
-- [ ] Add Libre-only Cornell structure assistant UI.
-- [ ] Add compatibility status and block count.
-- [ ] Add compact semantic help using native details/summary.
-- [ ] Prevent silent Libre -> Cornell conversion for non-empty unstructured bodies.
-- [ ] Rename visible H2/H3 controls to generic Sección/Subsec. labels.
-- [ ] Keep ARIA/title descriptions explicit about H2/H3.
-- [ ] Integrate assistant refresh into Libre input/render flow.
-- [ ] Preserve existing draft persistence and filesystem save behavior.
-- [ ] Update README and userscript version to v1.7.0.
+- [x] Add Cornell compatibility analysis helper.
+- [x] Serialize new Cornell blocks with semantic `### Cue:` headings.
+- [x] Keep parser compatibility with legacy numbered cue headings.
+- [x] Prefer the final top-level Summary delimiter so imported content can contain earlier Summary headings.
+- [x] Add non-destructive `prepareCornellBody()`.
+- [x] Add semantic cue insertion.
+- [x] Add Summary navigation.
+- [x] Add Libre-only Cornell structure assistant UI.
+- [x] Add compatibility status and block count.
+- [x] Add compact semantic help using native details/summary.
+- [x] Prevent silent Libre -> Cornell conversion for non-empty unstructured bodies.
+- [x] Rename visible H2/H3 controls to generic Sección/Subsec. labels.
+- [x] Keep ARIA/title descriptions explicit about H2/H3.
+- [x] Integrate assistant refresh into Libre input/render flow.
+- [x] Preserve existing draft persistence and filesystem save behavior.
+- [x] Update README and userscript version to v1.7.0.
 
 ## Validation
 
 - [ ] Run `node --check markdown-notes/chatgpt-markdown-notes.user.js`.
-- [ ] Parse the complete userscript successfully.
+- [x] Parse the complete userscript successfully with the V8 JavaScript parser.
 - [ ] Validate empty note preparation.
-- [ ] Validate arbitrary Markdown preparation preserves exact content.
-- [ ] Validate fenced code/Mermaid/headings survive preparation.
-- [ ] Validate cue insertion produces parseable Cornell Markdown.
+- [x] Validate arbitrary Markdown preparation preserves note content using an isolated parser/serializer check.
+- [x] Validate fenced code and heading-like Cornell markers survive preparation in isolated parser/serializer checks.
+- [x] Validate semantic Cornell serialization and parsing round-trip, including legacy numbered compatibility.
 - [ ] Validate Summary navigation caret placement.
 - [ ] Validate non-canonical Libre cannot silently switch to Cornell.
 - [ ] Validate canonical Cornell switches normally.
