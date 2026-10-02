@@ -159,3 +159,50 @@ New Cornell serialization MUST make cue boundaries understandable in raw Libre M
 - **WHEN** the body is parsed
 - **THEN** that heading SHALL remain note content
 - **AND** SHALL NOT create another Cornell block.
+
+
+### Requirement: Local Cornell block actions
+
+Cornell mode MUST provide block-local insertion and guarded deletion controls.
+
+#### Scenario: Insert block after current block
+
+- **GIVEN** a Cornell block exists
+- **WHEN** the user activates its compact add control
+- **THEN** Markdown Notes SHALL insert a new blank block immediately after that block
+- **AND** SHALL preserve the order and content of all existing blocks
+- **AND** SHALL focus the new block's Cue / Question field.
+
+#### Scenario: Append action remains available
+
+- **GIVEN** Cornell mode is active
+- **WHEN** the editor renders
+- **THEN** the existing append-at-end block action SHALL remain available in addition to block-local insertion.
+
+#### Scenario: First delete activation does not delete
+
+- **GIVEN** a Cornell block exists
+- **WHEN** the user activates Delete once
+- **THEN** the block SHALL remain unchanged
+- **AND** the control SHALL enter a temporary confirmation state.
+
+#### Scenario: Confirm delete
+
+- **GIVEN** a block's Delete control is in its temporary confirmation state
+- **WHEN** the user activates that control again before the confirmation expires
+- **THEN** that block SHALL be removed
+- **AND** other blocks SHALL remain unchanged.
+
+#### Scenario: Delete confirmation expires
+
+- **GIVEN** a block's Delete control is armed for confirmation
+- **WHEN** the confirmation window expires without a second activation
+- **THEN** the block SHALL remain unchanged
+- **AND** the Delete control SHALL return to its normal state.
+
+#### Scenario: Empty block also requires confirmation
+
+- **GIVEN** an empty Cornell block exists
+- **WHEN** the user activates Delete once
+- **THEN** the block SHALL NOT be removed immediately
+- **AND** the same confirmation friction SHALL apply as for populated blocks.
