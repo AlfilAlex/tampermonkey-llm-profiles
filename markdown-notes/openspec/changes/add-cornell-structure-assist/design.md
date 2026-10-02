@@ -220,3 +220,52 @@ The parser remains backward compatible:
 3. serialization always writes the semantic form.
 
 For Summary detection, use the last top-level `## Summary` outside fenced code. This allows an earlier Summary heading inside imported freeform content to remain part of the notes.
+
+
+## Cornell Block Header Actions
+
+Each Cornell block header exposes local structural actions:
+
+```text
+[↑] [↓] [+] [Eliminar]
+```
+
+### Insert after current block
+
+The compact `+` is contextual:
+
+1. locate the current block by id;
+2. create a blank Cornell block;
+3. splice it at `currentIndex + 1`;
+4. synchronize the canonical body;
+5. rerender;
+6. focus the new block's Cue / Question field.
+
+The existing bottom `+ Añadir bloque` remains an append-at-end action.
+
+### Delete friction
+
+Deletion uses an inline two-step confirmation rather than a blocking browser modal.
+
+Initial state:
+
+```text
+[Eliminar]
+```
+
+First activation:
+
+```text
+[Confirmar]
+```
+
+The armed state lasts approximately three seconds. A second activation during that window deletes the block. If the timeout expires, the control returns to `Eliminar`.
+
+Rationale:
+
+- prevents accidental single-click deletion;
+- works consistently for empty and populated blocks;
+- keeps confirmation local to the block being removed;
+- avoids disruptive native `window.confirm()` dialogs.
+
+The armed button receives an explicit destructive-confirmation class plus updated title/ARIA text. Rerendering naturally clears any armed state.
