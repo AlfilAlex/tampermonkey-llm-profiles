@@ -1679,6 +1679,28 @@
         user-select: none !important;
       }
 
+
+      #${APP}-panel .tmn-library-bar {display:flex; align-items:center; gap:8px; padding:7px 12px; border-bottom:1px solid #5555; font-size:11px;}
+      #${APP}-panel .tmn-library-bar button, #${APP}-panel .tmn-library-view button {padding:6px 9px; min-height:28px;}
+      #${APP}-panel .tmn-linked-count {opacity:.75;}
+      #${APP}-panel .tmn-library-view[hidden], #${APP}-panel .tmn-library-preview[hidden] {display:none!important;}
+      #${APP}-panel .tmn-library-view {display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; gap:9px; padding:10px;}
+      #${APP}-panel .tmn-library-actions, #${APP}-panel .tmn-library-item-actions {display:flex;gap:8px;}
+      #${APP}-panel .tmn-library-status {font-size:11px;opacity:.75;}
+      #${APP}-panel .tmn-library-list {display:flex;flex-direction:column;gap:4px;max-height:32%;overflow:auto;}
+      #${APP}-panel .tmn-library-list button {width:100%;text-align:left;overflow-wrap:anywhere;line-height:1.4;background:#8882;}
+      #${APP}-panel .tmn-library-list button[aria-current="true"] {border-color:#ddd;}
+      #${APP}-panel .tmn-library-preview {display:flex;flex-direction:column;gap:8px;min-height:0;flex:1;border-top:1px solid #5555;padding-top:8px;}
+      #${APP}-panel .tmn-library-filename {font-weight:700;font-size:12px;overflow-wrap:anywhere;}
+      #${APP}-panel .tmn-library-origin {font-size:11px;color:inherit;}
+      #${APP}-panel .tmn-library-origin[hidden] {display:none!important;}
+      #${APP}-panel .tmn-library-body {flex:1;min-height:100px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,Menlo,monospace;padding:10px;border:1px solid #5555;border-radius:8px;background:#0003;}
+      #${APP}-panel.tmn-library-open .tmn-mode-switch,
+      #${APP}-panel.tmn-library-open .tmn-markdown-toolbar,
+      #${APP}-panel.tmn-library-open .tmn-cornell-assist,
+      #${APP}-panel.tmn-library-open .tmn-editor-wrap,
+      #${APP}-panel.tmn-library-open .tmn-footer {display:none!important;}
+
       #${APP}-panel .tmn-header {
         display: flex;
         gap: 10px;
@@ -2180,6 +2202,29 @@
         <button class="tmn-forget-folder" type="button" title="Olvidar carpeta configurada">Olvidar</button>
       </div>
 
+
+      <div class="tmn-library-bar">
+        <button class="tmn-library-toggle" type="button">Biblioteca</button>
+        <span class="tmn-linked-count">Sin archivos vinculados</span>
+      </div>
+      <section class="tmn-library-view" aria-label="Biblioteca de notas guardadas" hidden>
+        <div class="tmn-library-actions">
+          <button class="tmn-library-refresh" type="button">Actualizar archivos</button>
+          <button class="tmn-library-back" type="button">Volver a la nota</button>
+        </div>
+        <div class="tmn-library-status" aria-live="polite">Elige un archivo Markdown.</div>
+        <div class="tmn-library-list" aria-label="Archivos de la carpeta"></div>
+        <div class="tmn-library-preview" hidden>
+          <div class="tmn-library-filename"></div>
+          <a class="tmn-library-origin" target="_blank" rel="noopener noreferrer" hidden>Ver chat de origen</a>
+          <pre class="tmn-library-body"></pre>
+          <div class="tmn-library-item-actions">
+            <button class="tmn-library-link" type="button">Vincular a este chat</button>
+            <button class="tmn-library-unlink" type="button">Desvincular</button>
+          </div>
+        </div>
+      </section>
+
       <div class="tmn-mode-switch" role="tablist" aria-label="Modo de notas">
         <button type="button" role="tab" data-mode="freeform">Libre</button>
         <button type="button" role="tab" data-mode="cornell">Cornell</button>
@@ -2301,6 +2346,22 @@
         console.error('[ChatGPT Markdown Notes] Error al olvidar carpeta:', error);
         setStatus(error?.message || String(error), 'error');
       }
+    });
+
+
+    panel.querySelector('.tmn-library-toggle').addEventListener('click', () => {
+      setLibraryVisible(!libraryVisible);
+      if (libraryVisible) refreshLibrary().catch(error => setLibraryStatus(error.message));
+    });
+    panel.querySelector('.tmn-library-back').addEventListener('click', () => setLibraryVisible(false));
+    panel.querySelector('.tmn-library-refresh').addEventListener('click', () => {
+      refreshLibrary().catch(error => setLibraryStatus(error.message));
+    });
+    panel.querySelector('.tmn-library-link').addEventListener('click', () => {
+      changeLibraryLink(true).catch(error => setLibraryStatus(error.message));
+    });
+    panel.querySelector('.tmn-library-unlink').addEventListener('click', () => {
+      changeLibraryLink(false).catch(error => setLibraryStatus(error.message));
     });
 
     panel.querySelector('.tmn-save').addEventListener('click', saveFile);
@@ -2874,6 +2935,7 @@
     renderFolder();
     renderSaveButton();
     updateStatus();
+    renderLibrary();
   }
 
   // ===========================================================================
