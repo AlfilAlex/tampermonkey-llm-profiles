@@ -1120,6 +1120,40 @@
       return null;
     }
   }
+
+  function parseMarkdownMetadata(raw) {
+    const text = String(raw || '');
+    const headerMatch = /^---\r?\n([\s\S]*?)\r?\n---(?=\r?\n|$)/.exec(text);
+    const header = headerMatch ? headerMatch[1] : '';
+    const scalar = key => {
+      const match = new RegExp('^' + key + ':\\s*(.*)$', 'm').exec(header);
+      if (!match) return null;
+      const value = match[1].trim();
+      if (!value || value === 'null') return null;
+      if (value.startsWith('"')) {
+        try { return JSON.parse(value); } catch { return null; }
+      }
+      return value.replace(/^'|'$/g, '');
+    };
+    const linkedChatUrls = [];
+    const block = /^linked_chat_urls:[^\r\n]*\r?\n((?:[ \t]+-[^\r\n]*(?:\r?\n|$))*)/m.exec(header);
+    if (block) {
+      for (const line of block[1].split(/\r?\n/)) {
+        const match = /^\s*-\s+(.+?)\s*$/.exec(line);
+        if (!match) continue;
+        let url = match[1];
+        try { url = JSON.parse(url); } catch { url = url.replace(/^'|'$/g, ''); }
+        const safe = validChatUrl(url);
+        if (safe && !linkedChatUrls.includes(safe)) linkedChatUrls.push(safe);
+      }
+    }
+    return {
+      originChatId: scalar('chat_id'),
+      originChatUrl: validChatUrl(scalar('chat_url')),
+      linkedChatUrls,
+      headerMatch
+    };
+  }
   function buildMarkdown(linkedChatUrls = []) {
     const title = currentNoteTitle();
 
