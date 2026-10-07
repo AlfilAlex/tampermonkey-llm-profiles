@@ -1088,6 +1088,38 @@
       .replaceAll('\n', '\\n')}"`;
   }
 
+
+  function chatLinksKey(chatKey = activeChatKey) {
+    return directoryId && chatKey ? directoryId + ':' + chatKey : null;
+  }
+
+  async function loadChatLinks(chatKey = activeChatKey) {
+    const key = chatLinksKey(chatKey);
+    if (!key) return [];
+    const stored = await idbGet(LINKS_STORE, key);
+    return Array.isArray(stored)
+      ? [...new Set(stored.filter(name => typeof name === 'string' && /\.md$/i.test(name)))]
+      : [];
+  }
+
+  async function persistChatLinks(files, chatKey = activeChatKey) {
+    const key = chatLinksKey(chatKey);
+    if (!key) throw new Error('Primero configura una carpeta.');
+    await idbSet(LINKS_STORE, key, [...new Set(files)]);
+  }
+
+  function validChatUrl(value) {
+    if (typeof value !== 'string') return null;
+    try {
+      const url = new URL(value);
+      if (url.protocol !== 'https:' ||
+          !['chatgpt.com', 'chat.openai.com'].includes(url.hostname) ||
+          !/^\/c\/[^/]+$/.test(url.pathname)) return null;
+      return url.origin + url.pathname;
+    } catch {
+      return null;
+    }
+  }
   function buildMarkdown(linkedChatUrls = []) {
     const title = currentNoteTitle();
 
