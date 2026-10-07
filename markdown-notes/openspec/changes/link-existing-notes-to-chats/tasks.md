@@ -15,4 +15,5 @@
 
 ## 4. Verification
 - [x] 4.1 Validate JavaScript syntax and metadata parser/serializer behavior.
-- [ ] 4.2 Document manual browser scenarios for permissions, legacy files, Cornell, reload, and overwrite safety.
+- [x] 4.2 Document manual browser scenarios for permissions, legacy files, Cornell, reload, and overwrite safety.
+- [ ] 4.3 Execute those scenarios in Chrome/Edge with Tampermonkey and verify actual filesystem permission behavior.
