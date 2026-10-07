@@ -3150,13 +3150,13 @@
       try { existingText = await readMarkdownFile(targetFilename); }
       catch (error) { if (error?.name !== 'NotFoundError') throw error; }
       const previous = parseMarkdownMetadata(existingText);
-      if (!activeState.originChatId) {
-        activeState.originChatId = previous.originChatId || getChatId();
-      }
-      if (!activeState.originChatUrl) {
-        activeState.originChatUrl = previous.originChatUrl ||
-          (activeState.originChatId ? getChatUrl() : null);
-      }
+      // The provenance already recorded on disk is authoritative. Never
+      // replace it with the active conversation just because the file is edited.
+      if (previous.originChatId) activeState.originChatId = previous.originChatId;
+      else if (!activeState.originChatId) activeState.originChatId = getChatId();
+      if (previous.originChatUrl) activeState.originChatUrl = previous.originChatUrl;
+      else if (!activeState.originChatUrl && activeState.originChatId)
+        activeState.originChatUrl = 'https://chatgpt.com/c/' + activeState.originChatId;
       renderHeader();
       setStatus(`Guardando cambios en ${targetFilename}…`);
 
