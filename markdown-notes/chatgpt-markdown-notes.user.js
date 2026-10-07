@@ -2826,7 +2826,10 @@
     const next = add
       ? [...new Set([...linkedFiles, name])]
       : linkedFiles.filter(x => x !== name);
-    await persistChatLinks(next, chatKey);
+    // Keep the captured chat/directory key, even if SPA navigation happened
+    // while the browser was writing the file.
+    await idbSet(LINKS_STORE, dirId + ':' + chatKey, next);
+    if (chatKey !== activeChatKey || dirId !== directoryId) return;
     linkedFiles = next;
     selectedLibraryFile = { name, content: updated, originChatUrl: parseMarkdownMetadata(updated).originChatUrl };
     renderLibrary();
