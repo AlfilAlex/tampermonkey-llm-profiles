@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.8.1
+// @version      1.9.0
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -16,11 +16,13 @@
 
   const APP = 'tm-chatgpt-markdown-notes';
   const DB_NAME = `${APP}-db`;
-  const DB_VERSION = 2;
+  const DB_VERSION = 3;
 
   const HANDLE_STORE = 'handles';
   const DRAFT_STORE = 'drafts';
+  const LINKS_STORE = 'chat-links';
   const DIRECTORY_KEY = 'notes-directory';
+  const DIRECTORY_ID_KEY = 'notes-directory-id';
 
   const PANEL_OPEN_KEY = `${APP}:panel-open`;
   const PANEL_WIDTH_KEY = `${APP}:panel-width`;
@@ -30,6 +32,11 @@
   const NEW_CHAT_SESSION_KEY = `${APP}:new-chat-session-key`;
 
   let directoryHandle = null;
+  let directoryId = null;
+  let linkedFiles = [];
+  let libraryFiles = [];
+  let libraryVisible = false;
+  let selectedLibraryFile = null;
   let panel = null;
   let launcher = null;
 
@@ -63,6 +70,9 @@
 
         if (!db.objectStoreNames.contains(DRAFT_STORE)) {
           db.createObjectStore(DRAFT_STORE);
+        }
+        if (!db.objectStoreNames.contains(LINKS_STORE)) {
+          db.createObjectStore(LINKS_STORE);
         }
       };
 
@@ -589,6 +599,8 @@
       filenameFallbackAt: null,
       noteMode: 'freeform',
       savedNoteMode: null,
+      originChatId: null,
+      originChatUrl: null,
       cornell: normalizeCornellState(null),
       savedCornellSnapshot: null,
       createdAt: null,
@@ -657,6 +669,8 @@
       savedNoteMode: ['freeform', 'cornell'].includes(value.savedNoteMode)
         ? value.savedNoteMode
         : null,
+      originChatId: typeof value.originChatId === 'string' ? value.originChatId : null,
+      originChatUrl: typeof value.originChatUrl === 'string' ? value.originChatUrl : null,
       cornell,
       savedCornellSnapshot: typeof value.savedCornellSnapshot === 'string'
         ? value.savedCornellSnapshot
@@ -673,9 +687,12 @@
     const stored = await idbGet(DRAFT_STORE, chatKey);
     const state = normalizeState(stored);
 
-    // noteId es identidad interna y debe permanecer estable incluso antes del
-    // primer guardado al filesystem.
-    if (!stored?.noteId) {
+    // Existing saved drafts keep their original chat as provenance.
+    if (stored?.lastSavedAt && !stored?.originChatId && chatKey.startsWith('chat:')) {
+      state.originChatId = chatKey.slice(5);
+      state.originChatUrl = 'https://chatgpt.com/c/' + state.originChatId;
+    }
+    if (!stored?.noteId || (state.originChatId && !stored?.originChatId)) {
       await idbSet(DRAFT_STORE, chatKey, state);
     }
 
@@ -951,6 +968,11 @@
 
       if (handle?.kind === 'directory') {
         directoryHandle = handle;
+        directoryId = await idbGet(HANDLE_STORE, DIRECTORY_ID_KEY);
+        if (!directoryId) {
+          directoryId = createNoteId();
+          await idbSet(HANDLE_STORE, DIRECTORY_ID_KEY, directoryId);
+        }
       }
     } catch (error) {
       console.warn(
@@ -975,8 +997,16 @@
       startIn: 'documents'
     });
 
+    const same = directoryHandle && typeof handle.isSameEntry === 'function'
+      ? await handle.isSameEntry(directoryHandle)
+      : false;
+    directoryId = same && directoryId ? directoryId : createNoteId();
     directoryHandle = handle;
     await idbSet(HANDLE_STORE, DIRECTORY_KEY, handle);
+    await idbSet(HANDLE_STORE, DIRECTORY_ID_KEY, directoryId);
+    libraryFiles = [];
+    selectedLibraryFile = null;
+    linkedFiles = await loadChatLinks(activeChatKey);
     renderFolder();
 
     return handle;
@@ -984,8 +1014,14 @@
 
   async function forgetDirectory() {
     directoryHandle = null;
+    directoryId = null;
+    linkedFiles = [];
+    libraryFiles = [];
+    selectedLibraryFile = null;
     await idbDelete(HANDLE_STORE, DIRECTORY_KEY);
+    await idbDelete(HANDLE_STORE, DIRECTORY_ID_KEY);
     renderFolder();
+    renderLibrary();
   }
 
   async function ensureWritePermission(handle) {
@@ -1052,15 +1088,15 @@
       .replaceAll('\n', '\\n')}"`;
   }
 
-  function buildMarkdown() {
+  function buildMarkdown(linkedChatUrls = []) {
     const title = currentNoteTitle();
 
     if (!title) {
       throw new Error('Escribe un título / nombre de archivo antes de guardar.');
     }
 
-    const chatId = getChatId();
-    const chatUrl = getChatUrl();
+    const chatId = activeState.originChatId || null;
+    const chatUrl = activeState.originChatUrl || null;
     const body = String(activeState.body || '').trim();
 
     const created = activeState.createdAt || localIsoTimestamp();
@@ -1080,7 +1116,8 @@
 
     lines.push(
       chatId ? `chat_id: ${yamlString(chatId)}` : 'chat_id: null',
-      `chat_url: ${yamlString(chatUrl)}`,
+      chatUrl ? `chat_url: ${yamlString(chatUrl)}` : 'chat_url: null',
+      ...(linkedChatUrls.length ? ['linked_chat_urls:', ...linkedChatUrls.map(url => `  - ${yamlString(url)}`)] : []),
       '---',
       '',
       `# ${title}`,
@@ -2761,13 +2798,24 @@
         activeState.createdAt = localIsoTimestamp();
       }
 
+      let existingText = null;
+      try { existingText = await readMarkdownFile(targetFilename); }
+      catch (error) { if (error?.name !== 'NotFoundError') throw error; }
+      const previous = parseMarkdownMetadata(existingText);
+      if (!activeState.originChatId) {
+        activeState.originChatId = previous.originChatId || getChatId();
+      }
+      if (!activeState.originChatUrl) {
+        activeState.originChatUrl = previous.originChatUrl ||
+          (activeState.originChatId ? getChatUrl() : null);
+      }
       renderHeader();
       setStatus(`Guardando cambios en ${targetFilename}…`);
 
       await writeMarkdownFile(
         directoryHandle,
         targetFilename,
-        buildMarkdown()
+        buildMarkdown(previous.linkedChatUrls)
       );
 
       // Sólo después de una escritura exitosa registramos el nombre del archivo
@@ -2831,8 +2879,10 @@
 
     activeChatKey = chatKey;
     activeState = await loadState(chatKey);
-
+    linkedFiles = await loadChatLinks(chatKey);
+    selectedLibraryFile = null;
     renderAll();
+    renderLibrary();
   }
 
   async function checkNavigation() {
@@ -2907,6 +2957,7 @@
 
     activeChatKey = getCurrentChatKey();
     activeState = await loadState(activeChatKey);
+    linkedFiles = await loadChatLinks(activeChatKey);
 
     renderAll();
     restorePanelState();
@@ -2935,7 +2986,7 @@
 
       setPanelWidth(currentWidth, false);
     });
-    console.info('[ChatGPT Markdown Notes] v1.8.1 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.9.0 cargado');
   }
 
   bootstrap().catch(error => {
