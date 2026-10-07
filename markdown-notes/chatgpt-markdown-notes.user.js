@@ -2624,7 +2624,10 @@
     if (launcher) launcher.hidden = open;
 
     if (open) {
-      requestAnimationFrame(focusActiveEditor);
+      requestAnimationFrame(() => {
+        if (libraryVisible) panel?.querySelector('.tmn-library-refresh')?.focus();
+        else focusActiveEditor();
+      });
     }
   }
 
@@ -2759,8 +2762,13 @@
     if (initialChatKey !== activeChatKey || initialDirectoryId !== directoryId) return;
 
     libraryFiles = available.sort((a,b) => a.name.localeCompare(b.name));
-    const combined = [...new Set([...linkedFiles, ...matched])];
-    if (combined.length !== linkedFiles.length) {
+    const existingNames = new Set(available.map(item => item.name));
+    const combined = [...new Set([
+      ...linkedFiles.filter(name => !existingNames.has(name)),
+      ...matched
+    ])];
+    if (combined.length !== linkedFiles.length ||
+        combined.some(name => !linkedFiles.includes(name))) {
       await persistChatLinks(combined, initialChatKey);
       linkedFiles = combined;
     }
