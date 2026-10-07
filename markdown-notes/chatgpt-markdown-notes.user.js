@@ -2665,6 +2665,165 @@
     }
   }
 
+
+  function setLibraryStatus(message) {
+    const status = panel?.querySelector('.tmn-library-status');
+    if (status) status.textContent = String(message || '');
+  }
+
+  function setLibraryVisible(visible) {
+    libraryVisible = Boolean(visible);
+    panel?.classList.toggle('tmn-library-open', libraryVisible);
+    const region = panel?.querySelector('.tmn-library-view');
+    if (region) region.hidden = !libraryVisible;
+    renderLibrary();
+    if (!libraryVisible) requestAnimationFrame(focusActiveEditor);
+  }
+
+  function renderLibrary() {
+    if (!panel) return;
+    const count = panel.querySelector('.tmn-linked-count');
+    if (count) count.textContent = linkedFiles.length
+      ? linkedFiles.length + ' archivo(s) vinculado(s)'
+      : 'Sin archivos vinculados';
+    panel.classList.toggle('tmn-library-open', libraryVisible);
+    const region = panel.querySelector('.tmn-library-view');
+    if (region) region.hidden = !libraryVisible;
+    const list = panel.querySelector('.tmn-library-list');
+    if (!list) return;
+    list.replaceChildren();
+
+    const indexed = new Map(libraryFiles.map(x => [x.name, x]));
+    const orderedNames = [
+      ...linkedFiles,
+      ...libraryFiles.map(x => x.name).filter(name => !linkedFiles.includes(name))
+    ];
+    for (const name of orderedNames) {
+      const entry = indexed.get(name);
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.textContent =
+        (linkedFiles.includes(name) ? 'Vinculada · ' : '') +
+        name + (entry ? '' : ' (no encontrado)');
+      row.setAttribute('aria-current', String(selectedLibraryFile?.name === name));
+      row.addEventListener('click', () => {
+        openLibraryFile(name).catch(error => setLibraryStatus(error.message));
+      });
+      list.appendChild(row);
+    }
+    const preview = panel.querySelector('.tmn-library-preview');
+    if (!preview) return;
+    preview.hidden = !selectedLibraryFile;
+    if (!selectedLibraryFile) return;
+
+    const selected = selectedLibraryFile;
+    panel.querySelector('.tmn-library-filename').textContent = selected.name;
+    const originLink = panel.querySelector('.tmn-library-origin');
+    const origin = validChatUrl(selected.originChatUrl);
+    originLink.hidden = !origin;
+    if (origin) originLink.href = origin;
+    else originLink.removeAttribute('href');
+    panel.querySelector('.tmn-library-body').textContent = selected.content;
+    const isLinked = linkedFiles.includes(selected.name);
+    panel.querySelector('.tmn-library-link').hidden = isLinked;
+    panel.querySelector('.tmn-library-unlink').hidden = !isLinked;
+  }
+
+  async function refreshLibrary() {
+    if (!directoryHandle) throw new Error('Configura primero la carpeta de notas.');
+    if (!(await ensureReadPermission(directoryHandle))) {
+      throw new Error('No se concedió permiso para leer la carpeta seleccionada.');
+    }
+    const initialChatKey = activeChatKey;
+    const initialDirectoryId = directoryId;
+    const available = [];
+    const matched = [];
+    const currentUrl = validChatUrl(getChatUrl());
+    for await (const handle of directoryHandle.values()) {
+      if (handle.kind !== 'file' || !/\.md$/i.test(handle.name)) continue;
+      let originChatUrl = null;
+      let linkedChatUrls = [];
+      try {
+        const file = await handle.getFile();
+        if (file.size <= 5 * 1024 * 1024) {
+          const meta = parseMarkdownMetadata(await file.text());
+          originChatUrl = meta.originChatUrl;
+          linkedChatUrls = meta.linkedChatUrls;
+        }
+      } catch (error) {
+        console.warn('[Markdown Notes] No se pudo leer el archivo:', handle.name, error);
+      }
+      available.push({ name: handle.name, originChatUrl, linkedChatUrls });
+      if (currentUrl && linkedChatUrls.includes(currentUrl)) matched.push(handle.name);
+    }
+    if (initialChatKey !== activeChatKey || initialDirectoryId !== directoryId) return;
+
+    libraryFiles = available.sort((a,b) => a.name.localeCompare(b.name));
+    const combined = [...new Set([...linkedFiles, ...matched])];
+    if (combined.length !== linkedFiles.length) {
+      await persistChatLinks(combined, initialChatKey);
+      linkedFiles = combined;
+    }
+    renderLibrary();
+    setLibraryStatus(libraryFiles.length + ' archivo(s) Markdown encontrados.');
+  }
+
+  async function openLibraryFile(filename) {
+    const initialChatKey = activeChatKey;
+    const initialDirectoryId = directoryId;
+    const content = await readMarkdownFile(filename);
+    if (initialChatKey !== activeChatKey || initialDirectoryId !== directoryId) return;
+    const meta = parseMarkdownMetadata(content);
+    selectedLibraryFile = {
+      name: filename,
+      content,
+      originChatUrl: meta.originChatUrl
+    };
+    renderLibrary();
+    setLibraryStatus('Vista de solo lectura. No modifica tu borrador.');
+  }
+
+  async function changeLibraryLink(add) {
+    if (!selectedLibraryFile || !directoryHandle) return;
+    const chatKey = activeChatKey;
+    const dirId = directoryId;
+    const chatUrl = validChatUrl(getChatUrl());
+    if (!chatKey?.startsWith('chat:') || !chatUrl)
+      throw new Error('Primero abre un chat guardado con una URL /c/ válida.');
+    const allowed = await ensureWritePermission(directoryHandle);
+    if (!allowed) throw new Error('Se necesita permiso de escritura para actualizar los vínculos.');
+
+    const name = selectedLibraryFile.name;
+    let original;
+    try {
+      original = await readMarkdownFile(name);
+    } catch (error) {
+      if (!add && error?.name === 'NotFoundError') {
+        const next = linkedFiles.filter(x => x !== name);
+        await persistChatLinks(next, chatKey);
+        if (chatKey === activeChatKey && dirId === directoryId) linkedFiles = next;
+        selectedLibraryFile = null;
+        renderLibrary();
+        setLibraryStatus('Referencia al archivo ausente eliminada del índice local.');
+        return;
+      }
+      throw error;
+    }
+    if (chatKey !== activeChatKey || dirId !== directoryId)
+      throw new Error('Cambió la conversación o carpeta. Repite la acción en el chat actual.');
+
+    const updated = withLinkedChatUrl(original, chatUrl, add);
+    await rewriteMetadata(name, original, updated);
+    const next = add
+      ? [...new Set([...linkedFiles, name])]
+      : linkedFiles.filter(x => x !== name);
+    await persistChatLinks(next, chatKey);
+    linkedFiles = next;
+    selectedLibraryFile = { name, content: updated, originChatUrl: parseMarkdownMetadata(updated).originChatUrl };
+    renderLibrary();
+    setLibraryStatus(add ? 'Documento vinculado al chat actual.' : 'Documento desvinculado; el archivo no fue eliminado.');
+  }
+
   function renderHeader() {
     if (!panel) return;
 
