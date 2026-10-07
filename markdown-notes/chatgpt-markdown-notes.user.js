@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.8.1
+// @version      1.9.0
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -16,11 +16,13 @@
 
   const APP = 'tm-chatgpt-markdown-notes';
   const DB_NAME = `${APP}-db`;
-  const DB_VERSION = 2;
+  const DB_VERSION = 3;
 
   const HANDLE_STORE = 'handles';
   const DRAFT_STORE = 'drafts';
+  const LINKS_STORE = 'chat-links';
   const DIRECTORY_KEY = 'notes-directory';
+  const DIRECTORY_ID_KEY = 'notes-directory-id';
 
   const PANEL_OPEN_KEY = `${APP}:panel-open`;
   const PANEL_WIDTH_KEY = `${APP}:panel-width`;
@@ -30,6 +32,11 @@
   const NEW_CHAT_SESSION_KEY = `${APP}:new-chat-session-key`;
 
   let directoryHandle = null;
+  let directoryId = null;
+  let linkedFiles = [];
+  let libraryFiles = [];
+  let libraryVisible = false;
+  let selectedLibraryFile = null;
   let panel = null;
   let launcher = null;
 
@@ -63,6 +70,9 @@
 
         if (!db.objectStoreNames.contains(DRAFT_STORE)) {
           db.createObjectStore(DRAFT_STORE);
+        }
+        if (!db.objectStoreNames.contains(LINKS_STORE)) {
+          db.createObjectStore(LINKS_STORE);
         }
       };
 
@@ -589,6 +599,8 @@
       filenameFallbackAt: null,
       noteMode: 'freeform',
       savedNoteMode: null,
+      originChatId: null,
+      originChatUrl: null,
       cornell: normalizeCornellState(null),
       savedCornellSnapshot: null,
       createdAt: null,
@@ -657,6 +669,8 @@
       savedNoteMode: ['freeform', 'cornell'].includes(value.savedNoteMode)
         ? value.savedNoteMode
         : null,
+      originChatId: typeof value.originChatId === 'string' ? value.originChatId : null,
+      originChatUrl: typeof value.originChatUrl === 'string' ? value.originChatUrl : null,
       cornell,
       savedCornellSnapshot: typeof value.savedCornellSnapshot === 'string'
         ? value.savedCornellSnapshot
@@ -673,9 +687,12 @@
     const stored = await idbGet(DRAFT_STORE, chatKey);
     const state = normalizeState(stored);
 
-    // noteId es identidad interna y debe permanecer estable incluso antes del
-    // primer guardado al filesystem.
-    if (!stored?.noteId) {
+    // Existing saved drafts keep their original chat as provenance.
+    if (stored?.lastSavedAt && !stored?.originChatId && chatKey.startsWith('chat:')) {
+      state.originChatId = chatKey.slice(5);
+      state.originChatUrl = 'https://chatgpt.com/c/' + state.originChatId;
+    }
+    if (!stored?.noteId || (state.originChatId && !stored?.originChatId)) {
       await idbSet(DRAFT_STORE, chatKey, state);
     }
 
@@ -951,6 +968,11 @@
 
       if (handle?.kind === 'directory') {
         directoryHandle = handle;
+        directoryId = await idbGet(HANDLE_STORE, DIRECTORY_ID_KEY);
+        if (!directoryId) {
+          directoryId = createNoteId();
+          await idbSet(HANDLE_STORE, DIRECTORY_ID_KEY, directoryId);
+        }
       }
     } catch (error) {
       console.warn(
@@ -975,8 +997,16 @@
       startIn: 'documents'
     });
 
+    const same = directoryHandle && typeof handle.isSameEntry === 'function'
+      ? await handle.isSameEntry(directoryHandle)
+      : false;
+    directoryId = same && directoryId ? directoryId : createNoteId();
     directoryHandle = handle;
     await idbSet(HANDLE_STORE, DIRECTORY_KEY, handle);
+    await idbSet(HANDLE_STORE, DIRECTORY_ID_KEY, directoryId);
+    libraryFiles = [];
+    selectedLibraryFile = null;
+    linkedFiles = await loadChatLinks(activeChatKey);
     renderFolder();
 
     return handle;
@@ -984,8 +1014,14 @@
 
   async function forgetDirectory() {
     directoryHandle = null;
+    directoryId = null;
+    linkedFiles = [];
+    libraryFiles = [];
+    selectedLibraryFile = null;
     await idbDelete(HANDLE_STORE, DIRECTORY_KEY);
+    await idbDelete(HANDLE_STORE, DIRECTORY_ID_KEY);
     renderFolder();
+    renderLibrary();
   }
 
   async function ensureWritePermission(handle) {
@@ -1052,15 +1088,133 @@
       .replaceAll('\n', '\\n')}"`;
   }
 
-  function buildMarkdown() {
+
+  function chatLinksKey(chatKey = activeChatKey) {
+    return directoryId && chatKey ? directoryId + ':' + chatKey : null;
+  }
+
+  async function loadChatLinks(chatKey = activeChatKey) {
+    const key = chatLinksKey(chatKey);
+    if (!key) return [];
+    const stored = await idbGet(LINKS_STORE, key);
+    return Array.isArray(stored)
+      ? [...new Set(stored.filter(name => typeof name === 'string' && /\.md$/i.test(name)))]
+      : [];
+  }
+
+  async function persistChatLinks(files, chatKey = activeChatKey) {
+    const key = chatLinksKey(chatKey);
+    if (!key) throw new Error('Primero configura una carpeta.');
+    await idbSet(LINKS_STORE, key, [...new Set(files)]);
+  }
+
+  function validChatUrl(value) {
+    if (typeof value !== 'string') return null;
+    try {
+      const url = new URL(value);
+      if (url.protocol !== 'https:' ||
+          !['chatgpt.com', 'chat.openai.com'].includes(url.hostname) ||
+          !/^\/c\/[^/]+$/.test(url.pathname)) return null;
+      return url.origin + url.pathname;
+    } catch {
+      return null;
+    }
+  }
+
+  function parseMarkdownMetadata(raw) {
+    const text = String(raw || '');
+    const headerMatch = /^---\r?\n([\s\S]*?)\r?\n---(?=\r?\n|$)/.exec(text);
+    const header = headerMatch ? headerMatch[1] : '';
+    const scalar = key => {
+      const match = new RegExp('^' + key + ':\\s*(.*)$', 'm').exec(header);
+      if (!match) return null;
+      const value = match[1].trim();
+      if (!value || value === 'null') return null;
+      if (value.startsWith('"')) {
+        try { return JSON.parse(value); } catch { return null; }
+      }
+      return value.replace(/^'|'$/g, '');
+    };
+    const linkedChatUrls = [];
+    const block = /^linked_chat_urls:[^\r\n]*\r?\n((?:[ \t]+-[^\r\n]*(?:\r?\n|$))*)/m.exec(header);
+    if (block) {
+      for (const line of block[1].split(/\r?\n/)) {
+        const match = /^\s*-\s+(.+?)\s*$/.exec(line);
+        if (!match) continue;
+        let url = match[1];
+        try { url = JSON.parse(url); } catch { url = url.replace(/^'|'$/g, ''); }
+        const safe = validChatUrl(url);
+        if (safe && !linkedChatUrls.includes(safe)) linkedChatUrls.push(safe);
+      }
+    }
+    return {
+      originChatId: scalar('chat_id'),
+      originChatUrl: validChatUrl(scalar('chat_url')),
+      linkedChatUrls,
+      headerMatch
+    };
+  }
+
+  function withLinkedChatUrl(raw, url, add) {
+    const normalized = validChatUrl(url);
+    if (!normalized) throw new Error('Se necesita un chat con URL válida para vincular.');
+    const input = String(raw);
+    const meta = parseMarkdownMetadata(input);
+    const links = new Set(meta.linkedChatUrls);
+    if (add) links.add(normalized);
+    else links.delete(normalized);
+    const rows = [...links].map(link => '  - ' + yamlString(link)).join('\n');
+    if (meta.headerMatch) {
+      const oldBlock = /^linked_chat_urls:[^\r\n]*\r?\n(?:[ \t]+-[^\r\n]*(?:\r?\n|$))*/m;
+      const remaining = meta.headerMatch[1].replace(oldBlock, '').replace(/\n+$/, '');
+      const updated = remaining + (rows ? '\nlinked_chat_urls:\n' + rows : '');
+      return input.replace(meta.headerMatch[0], () => '---\n' + updated + '\n---');
+    }
+    return rows ? '---\nlinked_chat_urls:\n' + rows + '\n---\n\n' + input : input;
+  }
+
+  async function readMarkdownFile(filename) {
+    if (!directoryHandle) throw new Error('Primero selecciona una carpeta.');
+    const handle = await directoryHandle.getFileHandle(filename, { create: false });
+    return (await handle.getFile()).text();
+  }
+
+  async function rewriteMetadata(filename, oldText, updatedText) {
+    if (oldText === updatedText) return;
+    const handle = await directoryHandle.getFileHandle(filename, { create: false });
+    const current = await (await handle.getFile()).text();
+    if (current !== oldText) {
+      throw new Error('El archivo cambió en disco. Actualiza la biblioteca y vuelve a intentarlo.');
+    }
+    const writable = await handle.createWritable();
+    try {
+      await writable.write(updatedText);
+      await writable.close();
+    } catch (error) {
+      try { await writable.abort(); } catch {}
+      throw error;
+    }
+  }
+
+  async function ensureReadPermission(handle) {
+    if (!handle) return false;
+    const permission = { mode: 'read' };
+    if (typeof handle.queryPermission === 'function' &&
+        await handle.queryPermission(permission) === 'granted') return true;
+    if (typeof handle.requestPermission === 'function')
+      return await handle.requestPermission(permission) === 'granted';
+    return true;
+  }
+
+  function buildMarkdown(linkedChatUrls = []) {
     const title = currentNoteTitle();
 
     if (!title) {
       throw new Error('Escribe un título / nombre de archivo antes de guardar.');
     }
 
-    const chatId = getChatId();
-    const chatUrl = getChatUrl();
+    const chatId = activeState.originChatId || null;
+    const chatUrl = activeState.originChatUrl || null;
     const body = String(activeState.body || '').trim();
 
     const created = activeState.createdAt || localIsoTimestamp();
@@ -1080,7 +1234,8 @@
 
     lines.push(
       chatId ? `chat_id: ${yamlString(chatId)}` : 'chat_id: null',
-      `chat_url: ${yamlString(chatUrl)}`,
+      chatUrl ? `chat_url: ${yamlString(chatUrl)}` : 'chat_url: null',
+      ...(linkedChatUrls.length ? ['linked_chat_urls:', ...linkedChatUrls.map(url => `  - ${yamlString(url)}`)] : []),
       '---',
       '',
       `# ${title}`,
@@ -1523,6 +1678,29 @@
         cursor: ew-resize !important;
         user-select: none !important;
       }
+
+
+      #${APP}-panel .tmn-library-bar {display:flex; align-items:center; gap:8px; padding:7px 12px; border-bottom:1px solid #5555; font-size:11px;}
+      #${APP}-panel .tmn-library-bar button, #${APP}-panel .tmn-library-view button {padding:6px 9px; min-height:28px;}
+      #${APP}-panel .tmn-linked-count {opacity:.75;}
+      #${APP}-panel .tmn-library-view[hidden], #${APP}-panel .tmn-library-preview[hidden] {display:none!important;}
+      #${APP}-panel .tmn-library-view {display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; gap:9px; padding:10px;}
+      #${APP}-panel .tmn-library-actions, #${APP}-panel .tmn-library-item-actions {display:flex;gap:8px;}
+      #${APP}-panel .tmn-library-status {font-size:11px;opacity:.75;}
+      #${APP}-panel .tmn-library-item-actions button[hidden] {display:none!important;}
+      #${APP}-panel .tmn-library-list {display:flex;flex-direction:column;gap:4px;max-height:32%;overflow:auto;}
+      #${APP}-panel .tmn-library-list button {width:100%;text-align:left;overflow-wrap:anywhere;line-height:1.4;background:#8882;}
+      #${APP}-panel .tmn-library-list button[aria-current="true"] {border-color:#ddd;}
+      #${APP}-panel .tmn-library-preview {display:flex;flex-direction:column;gap:8px;min-height:0;flex:1;border-top:1px solid #5555;padding-top:8px;}
+      #${APP}-panel .tmn-library-filename {font-weight:700;font-size:12px;overflow-wrap:anywhere;}
+      #${APP}-panel .tmn-library-origin {font-size:11px;color:inherit;}
+      #${APP}-panel .tmn-library-origin[hidden] {display:none!important;}
+      #${APP}-panel .tmn-library-body {flex:1;min-height:100px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.5 ui-monospace,Menlo,monospace;padding:10px;border:1px solid #5555;border-radius:8px;background:#0003;}
+      #${APP}-panel.tmn-library-open .tmn-mode-switch,
+      #${APP}-panel.tmn-library-open .tmn-markdown-toolbar,
+      #${APP}-panel.tmn-library-open .tmn-cornell-assist,
+      #${APP}-panel.tmn-library-open .tmn-editor-wrap,
+      #${APP}-panel.tmn-library-open .tmn-footer {display:none!important;}
 
       #${APP}-panel .tmn-header {
         display: flex;
@@ -2025,6 +2203,29 @@
         <button class="tmn-forget-folder" type="button" title="Olvidar carpeta configurada">Olvidar</button>
       </div>
 
+
+      <div class="tmn-library-bar">
+        <button class="tmn-library-toggle" type="button">Biblioteca</button>
+        <span class="tmn-linked-count">Sin archivos vinculados</span>
+      </div>
+      <section class="tmn-library-view" aria-label="Biblioteca de notas guardadas" hidden>
+        <div class="tmn-library-actions">
+          <button class="tmn-library-refresh" type="button">Actualizar archivos</button>
+          <button class="tmn-library-back" type="button">Volver a la nota</button>
+        </div>
+        <div class="tmn-library-status" aria-live="polite">Elige un archivo Markdown.</div>
+        <div class="tmn-library-list" aria-label="Archivos de la carpeta"></div>
+        <div class="tmn-library-preview" hidden>
+          <div class="tmn-library-filename"></div>
+          <a class="tmn-library-origin" target="_blank" rel="noopener noreferrer" hidden>Ver chat de origen</a>
+          <pre class="tmn-library-body"></pre>
+          <div class="tmn-library-item-actions">
+            <button class="tmn-library-link" type="button">Vincular a este chat</button>
+            <button class="tmn-library-unlink" type="button">Desvincular</button>
+          </div>
+        </div>
+      </section>
+
       <div class="tmn-mode-switch" role="tablist" aria-label="Modo de notas">
         <button type="button" role="tab" data-mode="freeform">Libre</button>
         <button type="button" role="tab" data-mode="cornell">Cornell</button>
@@ -2146,6 +2347,22 @@
         console.error('[ChatGPT Markdown Notes] Error al olvidar carpeta:', error);
         setStatus(error?.message || String(error), 'error');
       }
+    });
+
+
+    panel.querySelector('.tmn-library-toggle').addEventListener('click', () => {
+      setLibraryVisible(!libraryVisible);
+      if (libraryVisible) refreshLibrary().catch(error => setLibraryStatus(error.message));
+    });
+    panel.querySelector('.tmn-library-back').addEventListener('click', () => setLibraryVisible(false));
+    panel.querySelector('.tmn-library-refresh').addEventListener('click', () => {
+      refreshLibrary().catch(error => setLibraryStatus(error.message));
+    });
+    panel.querySelector('.tmn-library-link').addEventListener('click', () => {
+      changeLibraryLink(true).catch(error => setLibraryStatus(error.message));
+    });
+    panel.querySelector('.tmn-library-unlink').addEventListener('click', () => {
+      changeLibraryLink(false).catch(error => setLibraryStatus(error.message));
     });
 
     panel.querySelector('.tmn-save').addEventListener('click', saveFile);
@@ -2408,7 +2625,10 @@
     if (launcher) launcher.hidden = open;
 
     if (open) {
-      requestAnimationFrame(focusActiveEditor);
+      requestAnimationFrame(() => {
+        if (libraryVisible) panel?.querySelector('.tmn-library-refresh')?.focus();
+        else focusActiveEditor();
+      });
     }
   }
 
@@ -2447,6 +2667,173 @@
     if (forget) {
       forget.disabled = !directoryHandle;
     }
+  }
+
+
+  function setLibraryStatus(message) {
+    const status = panel?.querySelector('.tmn-library-status');
+    if (status) status.textContent = String(message || '');
+  }
+
+  function setLibraryVisible(visible) {
+    libraryVisible = Boolean(visible);
+    panel?.classList.toggle('tmn-library-open', libraryVisible);
+    const region = panel?.querySelector('.tmn-library-view');
+    if (region) region.hidden = !libraryVisible;
+    renderLibrary();
+    if (!libraryVisible) requestAnimationFrame(focusActiveEditor);
+  }
+
+  function renderLibrary() {
+    if (!panel) return;
+    const count = panel.querySelector('.tmn-linked-count');
+    if (count) count.textContent = linkedFiles.length
+      ? linkedFiles.length + ' archivo(s) vinculado(s)'
+      : 'Sin archivos vinculados';
+    panel.classList.toggle('tmn-library-open', libraryVisible);
+    const region = panel.querySelector('.tmn-library-view');
+    if (region) region.hidden = !libraryVisible;
+    const list = panel.querySelector('.tmn-library-list');
+    if (!list) return;
+    list.replaceChildren();
+
+    const indexed = new Map(libraryFiles.map(x => [x.name, x]));
+    const orderedNames = [
+      ...linkedFiles,
+      ...libraryFiles.map(x => x.name).filter(name => !linkedFiles.includes(name))
+    ];
+    for (const name of orderedNames) {
+      const entry = indexed.get(name);
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.textContent =
+        (linkedFiles.includes(name) ? 'Vinculada · ' : '') +
+        name + (entry ? '' : ' (no encontrado)');
+      row.setAttribute('aria-current', String(selectedLibraryFile?.name === name));
+      row.addEventListener('click', () => {
+        openLibraryFile(name).catch(error => setLibraryStatus(error.message));
+      });
+      list.appendChild(row);
+    }
+    const preview = panel.querySelector('.tmn-library-preview');
+    if (!preview) return;
+    preview.hidden = !selectedLibraryFile;
+    if (!selectedLibraryFile) return;
+
+    const selected = selectedLibraryFile;
+    panel.querySelector('.tmn-library-filename').textContent = selected.name;
+    const originLink = panel.querySelector('.tmn-library-origin');
+    const origin = validChatUrl(selected.originChatUrl);
+    originLink.hidden = !origin;
+    if (origin) originLink.href = origin;
+    else originLink.removeAttribute('href');
+    panel.querySelector('.tmn-library-body').textContent = selected.content;
+    const isLinked = linkedFiles.includes(selected.name);
+    panel.querySelector('.tmn-library-link').hidden = isLinked;
+    panel.querySelector('.tmn-library-unlink').hidden = !isLinked;
+  }
+
+  async function refreshLibrary() {
+    if (!directoryHandle) throw new Error('Configura primero la carpeta de notas.');
+    if (!(await ensureReadPermission(directoryHandle))) {
+      throw new Error('No se concedió permiso para leer la carpeta seleccionada.');
+    }
+    const initialChatKey = activeChatKey;
+    const initialDirectoryId = directoryId;
+    const available = [];
+    const matched = [];
+    const currentUrl = validChatUrl(getChatUrl());
+    for await (const handle of directoryHandle.values()) {
+      if (handle.kind !== 'file' || !/\.md$/i.test(handle.name)) continue;
+      let originChatUrl = null;
+      let linkedChatUrls = [];
+      try {
+        const file = await handle.getFile();
+        if (file.size <= 5 * 1024 * 1024) {
+          const meta = parseMarkdownMetadata(await file.text());
+          originChatUrl = meta.originChatUrl;
+          linkedChatUrls = meta.linkedChatUrls;
+        }
+      } catch (error) {
+        console.warn('[Markdown Notes] No se pudo leer el archivo:', handle.name, error);
+      }
+      available.push({ name: handle.name, originChatUrl, linkedChatUrls });
+      if (currentUrl && linkedChatUrls.includes(currentUrl)) matched.push(handle.name);
+    }
+    if (initialChatKey !== activeChatKey || initialDirectoryId !== directoryId) return;
+
+    libraryFiles = available.sort((a,b) => a.name.localeCompare(b.name));
+    const existingNames = new Set(available.map(item => item.name));
+    const combined = [...new Set([
+      ...linkedFiles.filter(name => !existingNames.has(name)),
+      ...matched
+    ])];
+    if (combined.length !== linkedFiles.length ||
+        combined.some(name => !linkedFiles.includes(name))) {
+      await persistChatLinks(combined, initialChatKey);
+      linkedFiles = combined;
+    }
+    renderLibrary();
+    setLibraryStatus(libraryFiles.length + ' archivo(s) Markdown encontrados.');
+  }
+
+  async function openLibraryFile(filename) {
+    const initialChatKey = activeChatKey;
+    const initialDirectoryId = directoryId;
+    const content = await readMarkdownFile(filename);
+    if (initialChatKey !== activeChatKey || initialDirectoryId !== directoryId) return;
+    const meta = parseMarkdownMetadata(content);
+    selectedLibraryFile = {
+      name: filename,
+      content,
+      originChatUrl: meta.originChatUrl
+    };
+    renderLibrary();
+    setLibraryStatus('Vista de solo lectura. No modifica tu borrador.');
+  }
+
+  async function changeLibraryLink(add) {
+    if (!selectedLibraryFile || !directoryHandle) return;
+    const chatKey = activeChatKey;
+    const dirId = directoryId;
+    const chatUrl = validChatUrl(getChatUrl());
+    if (!chatKey?.startsWith('chat:') || !chatUrl)
+      throw new Error('Primero abre un chat guardado con una URL /c/ válida.');
+    const allowed = await ensureWritePermission(directoryHandle);
+    if (!allowed) throw new Error('Se necesita permiso de escritura para actualizar los vínculos.');
+
+    const name = selectedLibraryFile.name;
+    let original;
+    try {
+      original = await readMarkdownFile(name);
+    } catch (error) {
+      if (!add && error?.name === 'NotFoundError') {
+        const next = linkedFiles.filter(x => x !== name);
+        await persistChatLinks(next, chatKey);
+        if (chatKey === activeChatKey && dirId === directoryId) linkedFiles = next;
+        selectedLibraryFile = null;
+        renderLibrary();
+        setLibraryStatus('Referencia al archivo ausente eliminada del índice local.');
+        return;
+      }
+      throw error;
+    }
+    if (chatKey !== activeChatKey || dirId !== directoryId)
+      throw new Error('Cambió la conversación o carpeta. Repite la acción en el chat actual.');
+
+    const updated = withLinkedChatUrl(original, chatUrl, add);
+    await rewriteMetadata(name, original, updated);
+    const next = add
+      ? [...new Set([...linkedFiles, name])]
+      : linkedFiles.filter(x => x !== name);
+    // Keep the captured chat/directory key, even if SPA navigation happened
+    // while the browser was writing the file.
+    await idbSet(LINKS_STORE, dirId + ':' + chatKey, next);
+    if (chatKey !== activeChatKey || dirId !== directoryId) return;
+    linkedFiles = next;
+    selectedLibraryFile = { name, content: updated, originChatUrl: parseMarkdownMetadata(updated).originChatUrl };
+    renderLibrary();
+    setLibraryStatus(add ? 'Documento vinculado al chat actual.' : 'Documento desvinculado; el archivo no fue eliminado.');
   }
 
   function renderHeader() {
@@ -2719,6 +3106,7 @@
     renderFolder();
     renderSaveButton();
     updateStatus();
+    renderLibrary();
   }
 
   // ===========================================================================
@@ -2761,13 +3149,24 @@
         activeState.createdAt = localIsoTimestamp();
       }
 
+      let existingText = null;
+      try { existingText = await readMarkdownFile(targetFilename); }
+      catch (error) { if (error?.name !== 'NotFoundError') throw error; }
+      const previous = parseMarkdownMetadata(existingText);
+      // The provenance already recorded on disk is authoritative. Never
+      // replace it with the active conversation just because the file is edited.
+      if (previous.originChatId) activeState.originChatId = previous.originChatId;
+      else if (!activeState.originChatId) activeState.originChatId = getChatId();
+      if (previous.originChatUrl) activeState.originChatUrl = previous.originChatUrl;
+      else if (!activeState.originChatUrl && activeState.originChatId)
+        activeState.originChatUrl = 'https://chatgpt.com/c/' + activeState.originChatId;
       renderHeader();
       setStatus(`Guardando cambios en ${targetFilename}…`);
 
       await writeMarkdownFile(
         directoryHandle,
         targetFilename,
-        buildMarkdown()
+        buildMarkdown(previous.linkedChatUrls)
       );
 
       // Sólo después de una escritura exitosa registramos el nombre del archivo
@@ -2831,8 +3230,10 @@
 
     activeChatKey = chatKey;
     activeState = await loadState(chatKey);
-
+    linkedFiles = await loadChatLinks(chatKey);
+    selectedLibraryFile = null;
     renderAll();
+    renderLibrary();
   }
 
   async function checkNavigation() {
@@ -2907,6 +3308,7 @@
 
     activeChatKey = getCurrentChatKey();
     activeState = await loadState(activeChatKey);
+    linkedFiles = await loadChatLinks(activeChatKey);
 
     renderAll();
     restorePanelState();
@@ -2935,7 +3337,7 @@
 
       setPanelWidth(currentWidth, false);
     });
-    console.info('[ChatGPT Markdown Notes] v1.8.1 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.9.0 cargado');
   }
 
   bootstrap().catch(error => {
