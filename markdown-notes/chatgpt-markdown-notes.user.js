@@ -1687,6 +1687,7 @@
       #${APP}-panel .tmn-library-view {display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; gap:9px; padding:10px;}
       #${APP}-panel .tmn-library-actions, #${APP}-panel .tmn-library-item-actions {display:flex;gap:8px;}
       #${APP}-panel .tmn-library-status {font-size:11px;opacity:.75;}
+      #${APP}-panel .tmn-library-item-actions button[hidden] {display:none!important;}
       #${APP}-panel .tmn-library-list {display:flex;flex-direction:column;gap:4px;max-height:32%;overflow:auto;}
       #${APP}-panel .tmn-library-list button {width:100%;text-align:left;overflow-wrap:anywhere;line-height:1.4;background:#8882;}
       #${APP}-panel .tmn-library-list button[aria-current="true"] {border-color:#ddd;}
