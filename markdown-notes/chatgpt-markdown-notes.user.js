@@ -1154,6 +1154,58 @@
       headerMatch
     };
   }
+
+  function withLinkedChatUrl(raw, url, add) {
+    const normalized = validChatUrl(url);
+    if (!normalized) throw new Error('Se necesita un chat con URL válida para vincular.');
+    const input = String(raw);
+    const meta = parseMarkdownMetadata(input);
+    const links = new Set(meta.linkedChatUrls);
+    if (add) links.add(normalized);
+    else links.delete(normalized);
+    const rows = [...links].map(link => '  - ' + yamlString(link)).join('\n');
+    if (meta.headerMatch) {
+      const oldBlock = /^linked_chat_urls:[^\r\n]*\r?\n(?:[ \t]+-[^\r\n]*(?:\r?\n|$))*/m;
+      const remaining = meta.headerMatch[1].replace(oldBlock, '').replace(/\n+$/, '');
+      const updated = remaining + (rows ? '\nlinked_chat_urls:\n' + rows : '');
+      return input.replace(meta.headerMatch[0], () => '---\n' + updated + '\n---');
+    }
+    return rows ? '---\nlinked_chat_urls:\n' + rows + '\n---\n\n' + input : input;
+  }
+
+  async function readMarkdownFile(filename) {
+    if (!directoryHandle) throw new Error('Primero selecciona una carpeta.');
+    const handle = await directoryHandle.getFileHandle(filename, { create: false });
+    return (await handle.getFile()).text();
+  }
+
+  async function rewriteMetadata(filename, oldText, updatedText) {
+    if (oldText === updatedText) return;
+    const handle = await directoryHandle.getFileHandle(filename, { create: false });
+    const current = await (await handle.getFile()).text();
+    if (current !== oldText) {
+      throw new Error('El archivo cambió en disco. Actualiza la biblioteca y vuelve a intentarlo.');
+    }
+    const writable = await handle.createWritable();
+    try {
+      await writable.write(updatedText);
+      await writable.close();
+    } catch (error) {
+      try { await writable.abort(); } catch {}
+      throw error;
+    }
+  }
+
+  async function ensureReadPermission(handle) {
+    if (!handle) return false;
+    const permission = { mode: 'read' };
+    if (typeof handle.queryPermission === 'function' &&
+        await handle.queryPermission(permission) === 'granted') return true;
+    if (typeof handle.requestPermission === 'function')
+      return await handle.requestPermission(permission) === 'granted';
+    return true;
+  }
+
   function buildMarkdown(linkedChatUrls = []) {
     const title = currentNoteTitle();
 
