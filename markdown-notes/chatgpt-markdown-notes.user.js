@@ -2792,6 +2792,30 @@
     setLibraryStatus(libraryFiles.length + ' archivo(s) Markdown encontrados.');
   }
 
+
+  function splitSavedMarkdownDocument(raw) {
+    const text = String(raw || '');
+    const metaMatch = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(text);
+    if (!metaMatch) return { prefix: '', body: text.trimEnd() };
+    let cursor = metaMatch[0].length;
+    const titleMatch = /^title:\s*(.*)$/m.exec(metaMatch[1]);
+    let title = null;
+    if (titleMatch) {
+      try { title = JSON.parse(titleMatch[1].trim()); }
+      catch { title = titleMatch[1].trim(); }
+    }
+    if (/^\r?\n/.test(text.slice(cursor))) cursor += text.slice(cursor).match(/^\r?\n/)[0].length;
+    const heading = /^# ([^\r\n]+)\r?\n(?:\r?\n)?/.exec(text.slice(cursor));
+    if (heading && typeof title === 'string' && heading[1] === title) cursor += heading[0].length;
+    return { prefix: text.slice(0,cursor), body: text.slice(cursor).trimEnd() };
+  }
+
+  function updateSavedMarkdownBody(raw, body) {
+    const prefix = splitSavedMarkdownDocument(raw).prefix;
+    const contents = String(body || '').trimEnd();
+    return prefix + (contents ? contents + (raw.includes('\r\n') ? '\r\n' : '\n') : '');
+  }
+
   async function openLibraryFile(filename) {
     const initialChatKey = activeChatKey;
     const initialDirectoryId = directoryId;
