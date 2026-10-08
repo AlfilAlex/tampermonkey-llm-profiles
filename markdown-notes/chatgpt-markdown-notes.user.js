@@ -1686,12 +1686,12 @@
       }
 
 
-      #${APP}-panel .tmn-library-bar {display:flex; align-items:center; gap:8px; padding:7px 12px; border-bottom:1px solid #5555; font-size:11px;}
+      #${APP}-panel .tmn-library-bar {display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:7px 12px; border-bottom:1px solid #5555; font-size:11px;}
       #${APP}-panel .tmn-library-bar button, #${APP}-panel .tmn-library-view button {padding:6px 9px; min-height:28px;}
       #${APP}-panel .tmn-linked-count {opacity:.75;}
       #${APP}-panel .tmn-library-view[hidden], #${APP}-panel .tmn-library-preview[hidden] {display:none!important;}
       #${APP}-panel .tmn-library-view {display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; gap:9px; padding:10px;}
-      #${APP}-panel .tmn-library-actions, #${APP}-panel .tmn-library-item-actions {display:flex;gap:8px;}
+      #${APP}-panel .tmn-library-actions, #${APP}-panel .tmn-library-item-actions {display:flex;gap:8px;flex-wrap:wrap;}
       #${APP}-panel .tmn-library-status {font-size:11px;opacity:.75;}
       #${APP}-panel .tmn-library-item-actions button[hidden] {display:none!important;}
       #${APP}-panel .tmn-library-list {display:flex;flex-direction:column;gap:4px;max-height:32%;overflow:auto;}
