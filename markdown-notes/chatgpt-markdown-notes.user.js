@@ -3247,9 +3247,48 @@
         activeState.createdAt = localIsoTimestamp();
       }
 
+      if (activeState.sharedFilename) {
+        const scopeKey = activeChatKey;
+        const scopeDirectoryId = directoryId;
+        const state = activeState;
+        if (state.sharedDirectoryId !== directoryId)
+          throw new Error('La carpeta cambió. Vuelve a elegir el documento desde Biblioteca.');
+        if (targetFilename !== state.sharedFilename)
+          throw new Error('El documento vinculado conserva su nombre. Usa Crear nuevo para otro archivo.');
+        if (typeof state.sharedFileSnapshot !== 'string')
+          throw new Error('No hay una versión base del documento. Vuelve a abrirlo desde Biblioteca.');
+        const current = await readMarkdownFile(targetFilename);
+        if (scopeKey !== activeChatKey || scopeDirectoryId !== directoryId || state !== activeState)
+          throw new Error('Cambió el chat durante el guardado. Repite la operación.');
+        if (current !== state.sharedFileSnapshot)
+          throw new Error('Conflicto: este archivo cambió desde que lo abriste. Conservamos tus cambios locales; actualiza Biblioteca para comparar.');
+
+        let nextContent = updateSavedMarkdownBody(current, state.body);
+        const chatUrl = validChatUrl(getChatUrl());
+        if (scopeKey.startsWith('chat:') && chatUrl)
+          nextContent = withLinkedChatUrl(nextContent, chatUrl, true);
+        await rewriteMetadata(targetFilename, current, nextContent);
+        state.sharedFileSnapshot = nextContent;
+        state.savedBody = state.body;
+        state.lastSavedAt = localIsoTimestamp();
+        await persistActiveState();
+        if (scopeKey.startsWith('chat:') && !linkedFiles.includes(targetFilename)) {
+          linkedFiles = [...linkedFiles, targetFilename];
+          try { await persistChatLinks(linkedFiles, scopeKey); }
+          catch (error) { console.warn('[Markdown Notes] Índice de vínculos:', error); }
+        }
+        renderLibrary();
+        setStatus('Cambios guardados en el documento existente.', 'success');
+        return;
+      }
+
       let existingText = null;
       try { existingText = await readMarkdownFile(targetFilename); }
       catch (error) { if (error?.name !== 'NotFoundError') throw error; }
+      if (existingText !== null &&
+          (!activeState.filename || activeState.filename !== targetFilename)) {
+        throw new Error('Ya existe un documento con ese nombre. Elige otro nombre o ábrelo desde Elegir existente.');
+      }
       const previous = parseMarkdownMetadata(existingText);
       // The provenance already recorded on disk is authoritative. Never
       // replace it with the active conversation just because the file is edited.
