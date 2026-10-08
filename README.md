@@ -32,7 +32,15 @@ No existe un OpenSpec compartido en la raíz: compartir repositorio no implica c
 - Mantiene ON/OFF y perfil seleccionado por conversación.
 
 
-### ChatGPT Markdown Notes v1.8.1
+### ChatGPT Markdown Notes v1.10.0
+
+**Flujo de notas por conversación:** al abrir el panel puedes elegir **Crear nuevo** o **Elegir existente**. La segunda opción abre la Biblioteca; selecciona un archivo .md y pulsa **Usar como nota activa** para cargarlo en el editor Libre/Cornell. **Guardar cambios** actualiza ese mismo archivo, aunque lo estés usando desde otro chat.
+
+- **Previsualizar** en Biblioteca no cambia el documento activo; adoptarlo requiere una acción explícita.
+- El chat de origen del documento permanece en `chat_id` y `chat_url`; los demás chats son asociaciones adicionales.
+- Se conserva el borrador por conversación. Si el archivo cambia fuera de ese chat, se bloquea la sobrescritura para no perder ediciones.
+- La vinculación se guarda localmente en el navegador y en los metadatos del archivo cuando hay URL permanente de chat. **No adjunta el documento al historial de mensajes de ChatGPT.**
+
 
 
 - Panel lateral de notas Markdown persistente por conversación.
