@@ -2816,6 +2816,65 @@
     return prefix + (contents ? contents + (raw.includes('\r\n') ? '\r\n' : '\n') : '');
   }
 
+
+  function hasUnsavedDraftToReplace() {
+    return Boolean(activeState && isDirty() && (activeState.body.trim() || currentFilename()));
+  }
+
+  function createNewActiveNote() {
+    if (!activeState) return;
+    if (hasUnsavedDraftToReplace() &&
+        !window.confirm('Hay cambios sin guardar. ¿Descartar el borrador y crear una nueva nota?')) return;
+    clearTimeout(draftSaveTimer);
+    activeState = createEmptyState();
+    selectedLibraryFile = null;
+    setLibraryVisible(false);
+    renderAll();
+    scheduleDraftPersistence();
+    panel?.querySelector('.tmn-file-name')?.focus();
+  }
+
+  async function adoptSelectedDocument() {
+    if (!selectedLibraryFile || !activeState || !directoryHandle || !directoryId) return;
+    const previousKey = activeChatKey;
+    const currentDir = directoryId;
+    const filename = selectedLibraryFile.name;
+    if (hasUnsavedDraftToReplace() &&
+        !window.confirm('La nota actual tiene cambios sin guardar. ¿Sustituirla por este archivo?')) return;
+    let raw = await readMarkdownFile(filename);
+    if (previousKey !== activeChatKey || currentDir !== directoryId) return;
+    if (previousKey.startsWith('chat:') && !linkedFiles.includes(filename)) {
+      await changeLibraryLink(true);
+      if (previousKey !== activeChatKey || currentDir !== directoryId) return;
+      raw = await readMarkdownFile(filename);
+    }
+    const metadata = parseMarkdownMetadata(raw);
+    const body = splitSavedMarkdownDocument(raw).body;
+    const mode = isCornellBody(body) ? 'cornell' : 'freeform';
+    const note = normalizeState({
+      ...createEmptyState(),
+      manualFilename: filename,
+      filename,
+      sharedFilename: filename,
+      sharedDirectoryId: currentDir,
+      sharedFileSnapshot: raw,
+      body,
+      savedBody: body,
+      originChatId: metadata.originChatId,
+      originChatUrl: metadata.originChatUrl,
+      noteMode: mode,
+      savedNoteMode: mode,
+      lastSavedAt: localIsoTimestamp()
+    });
+    if (previousKey !== activeChatKey || currentDir !== directoryId) return;
+    clearTimeout(draftSaveTimer);
+    activeState = note;
+    await persistActiveState();
+    setLibraryVisible(false);
+    renderAll();
+    setStatus('Documento existente activo. Guardar cambios actualizará este archivo.', 'success');
+  }
+
   async function openLibraryFile(filename) {
     const initialChatKey = activeChatKey;
     const initialDirectoryId = directoryId;
