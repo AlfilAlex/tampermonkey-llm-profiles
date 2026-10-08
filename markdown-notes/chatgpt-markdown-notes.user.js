@@ -2817,6 +2817,12 @@
   }
 
 
+  function assertSharedFileRevision(current, expected) {
+    if (current !== expected) {
+      throw new Error('Conflicto: este archivo cambió desde que lo abriste. Conservamos tus cambios locales; actualiza Biblioteca para comparar.');
+    }
+  }
+
   function hasUnsavedDraftToReplace() {
     return Boolean(activeState && isDirty() && (activeState.body.trim() || currentFilename()));
   }
@@ -3260,8 +3266,7 @@
         const current = await readMarkdownFile(targetFilename);
         if (scopeKey !== activeChatKey || scopeDirectoryId !== directoryId || state !== activeState)
           throw new Error('Cambió el chat durante el guardado. Repite la operación.');
-        if (current !== state.sharedFileSnapshot)
-          throw new Error('Conflicto: este archivo cambió desde que lo abriste. Conservamos tus cambios locales; actualiza Biblioteca para comparar.');
+        assertSharedFileRevision(current, state.sharedFileSnapshot);
 
         let nextContent = updateSavedMarkdownBody(current, state.body);
         const chatUrl = validChatUrl(getChatUrl());
