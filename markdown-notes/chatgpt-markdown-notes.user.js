@@ -3368,6 +3368,13 @@
     activeChatKey = chatKey;
     activeState = await loadState(chatKey);
     linkedFiles = await loadChatLinks(chatKey);
+    if (activeState.sharedFilename &&
+        activeState.sharedDirectoryId === directoryId &&
+        chatKey.startsWith('chat:') &&
+        !linkedFiles.includes(activeState.sharedFilename)) {
+      linkedFiles = [...linkedFiles, activeState.sharedFilename];
+      await persistChatLinks(linkedFiles, chatKey);
+    }
     selectedLibraryFile = null;
     renderAll();
     renderLibrary();
