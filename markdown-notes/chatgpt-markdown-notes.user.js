@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.9.0
+// @version      1.10.0
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -601,6 +601,9 @@
       savedNoteMode: null,
       originChatId: null,
       originChatUrl: null,
+      sharedFilename: null,
+      sharedDirectoryId: null,
+      sharedFileSnapshot: null,
       cornell: normalizeCornellState(null),
       savedCornellSnapshot: null,
       createdAt: null,
@@ -671,6 +674,9 @@
         : null,
       originChatId: typeof value.originChatId === 'string' ? value.originChatId : null,
       originChatUrl: typeof value.originChatUrl === 'string' ? value.originChatUrl : null,
+      sharedFilename: typeof value.sharedFilename === 'string' ? value.sharedFilename : null,
+      sharedDirectoryId: typeof value.sharedDirectoryId === 'string' ? value.sharedDirectoryId : null,
+      sharedFileSnapshot: typeof value.sharedFileSnapshot === 'string' ? value.sharedFileSnapshot : null,
       cornell,
       savedCornellSnapshot: typeof value.savedCornellSnapshot === 'string'
         ? value.savedCornellSnapshot
@@ -2205,7 +2211,8 @@
 
 
       <div class="tmn-library-bar">
-        <button class="tmn-library-toggle" type="button">Biblioteca</button>
+        <button class="tmn-create-new" type="button">Crear nuevo</button>
+        <button class="tmn-choose-existing" type="button">Elegir existente</button>
         <span class="tmn-linked-count">Sin archivos vinculados</span>
       </div>
       <section class="tmn-library-view" aria-label="Biblioteca de notas guardadas" hidden>
@@ -2220,7 +2227,8 @@
           <a class="tmn-library-origin" target="_blank" rel="noopener noreferrer" hidden>Ver chat de origen</a>
           <pre class="tmn-library-body"></pre>
           <div class="tmn-library-item-actions">
-            <button class="tmn-library-link" type="button">Vincular a este chat</button>
+            <button class="tmn-library-use" type="button">Usar como nota activa</button>
+            <button class="tmn-library-link" type="button">Vincular solo para consultar</button>
             <button class="tmn-library-unlink" type="button">Desvincular</button>
           </div>
         </div>
@@ -2350,9 +2358,13 @@
     });
 
 
-    panel.querySelector('.tmn-library-toggle').addEventListener('click', () => {
-      setLibraryVisible(!libraryVisible);
-      if (libraryVisible) refreshLibrary().catch(error => setLibraryStatus(error.message));
+    panel.querySelector('.tmn-create-new').addEventListener('click', createNewActiveNote);
+    panel.querySelector('.tmn-choose-existing').addEventListener('click', () => {
+      setLibraryVisible(true);
+      refreshLibrary().catch(error => setLibraryStatus(error.message));
+    });
+    panel.querySelector('.tmn-library-use').addEventListener('click', () => {
+      adoptSelectedDocument().catch(error => setLibraryStatus(error.message));
     });
     panel.querySelector('.tmn-library-back').addEventListener('click', () => setLibraryVisible(false));
     panel.querySelector('.tmn-library-refresh').addEventListener('click', () => {
@@ -2707,7 +2719,7 @@
       const row = document.createElement('button');
       row.type = 'button';
       row.textContent =
-        (linkedFiles.includes(name) ? 'Vinculada · ' : '') +
+        (activeState?.sharedFilename === name ? 'Activa · ' : linkedFiles.includes(name) ? 'Vinculada · ' : '') +
         name + (entry ? '' : ' (no encontrado)');
       row.setAttribute('aria-current', String(selectedLibraryFile?.name === name));
       row.addEventListener('click', () => {
@@ -2731,6 +2743,9 @@
     const isLinked = linkedFiles.includes(selected.name);
     panel.querySelector('.tmn-library-link').hidden = isLinked;
     panel.querySelector('.tmn-library-unlink').hidden = !isLinked;
+    panel.querySelector('.tmn-library-use').disabled =
+      selected.name === activeState?.sharedFilename &&
+      activeState.sharedDirectoryId === directoryId;
   }
 
   async function refreshLibrary() {
@@ -3337,7 +3352,7 @@
 
       setPanelWidth(currentWidth, false);
     });
-    console.info('[ChatGPT Markdown Notes] v1.9.0 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.10.0 cargado');
   }
 
   bootstrap().catch(error => {
