@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.9.0
+// @version      1.10.0
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -601,6 +601,9 @@
       savedNoteMode: null,
       originChatId: null,
       originChatUrl: null,
+      sharedFilename: null,
+      sharedDirectoryId: null,
+      sharedFileSnapshot: null,
       cornell: normalizeCornellState(null),
       savedCornellSnapshot: null,
       createdAt: null,
@@ -671,6 +674,9 @@
         : null,
       originChatId: typeof value.originChatId === 'string' ? value.originChatId : null,
       originChatUrl: typeof value.originChatUrl === 'string' ? value.originChatUrl : null,
+      sharedFilename: typeof value.sharedFilename === 'string' ? value.sharedFilename : null,
+      sharedDirectoryId: typeof value.sharedDirectoryId === 'string' ? value.sharedDirectoryId : null,
+      sharedFileSnapshot: typeof value.sharedFileSnapshot === 'string' ? value.sharedFileSnapshot : null,
       cornell,
       savedCornellSnapshot: typeof value.savedCornellSnapshot === 'string'
         ? value.savedCornellSnapshot
@@ -1680,12 +1686,12 @@
       }
 
 
-      #${APP}-panel .tmn-library-bar {display:flex; align-items:center; gap:8px; padding:7px 12px; border-bottom:1px solid #5555; font-size:11px;}
+      #${APP}-panel .tmn-library-bar {display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:7px 12px; border-bottom:1px solid #5555; font-size:11px;}
       #${APP}-panel .tmn-library-bar button, #${APP}-panel .tmn-library-view button {padding:6px 9px; min-height:28px;}
       #${APP}-panel .tmn-linked-count {opacity:.75;}
       #${APP}-panel .tmn-library-view[hidden], #${APP}-panel .tmn-library-preview[hidden] {display:none!important;}
       #${APP}-panel .tmn-library-view {display:flex; flex-direction:column; flex:1; min-height:0; overflow:auto; gap:9px; padding:10px;}
-      #${APP}-panel .tmn-library-actions, #${APP}-panel .tmn-library-item-actions {display:flex;gap:8px;}
+      #${APP}-panel .tmn-library-actions, #${APP}-panel .tmn-library-item-actions {display:flex;gap:8px;flex-wrap:wrap;}
       #${APP}-panel .tmn-library-status {font-size:11px;opacity:.75;}
       #${APP}-panel .tmn-library-item-actions button[hidden] {display:none!important;}
       #${APP}-panel .tmn-library-list {display:flex;flex-direction:column;gap:4px;max-height:32%;overflow:auto;}
@@ -2205,7 +2211,8 @@
 
 
       <div class="tmn-library-bar">
-        <button class="tmn-library-toggle" type="button">Biblioteca</button>
+        <button class="tmn-create-new" type="button">Crear nuevo</button>
+        <button class="tmn-choose-existing" type="button">Elegir existente</button>
         <span class="tmn-linked-count">Sin archivos vinculados</span>
       </div>
       <section class="tmn-library-view" aria-label="Biblioteca de notas guardadas" hidden>
@@ -2220,7 +2227,8 @@
           <a class="tmn-library-origin" target="_blank" rel="noopener noreferrer" hidden>Ver chat de origen</a>
           <pre class="tmn-library-body"></pre>
           <div class="tmn-library-item-actions">
-            <button class="tmn-library-link" type="button">Vincular a este chat</button>
+            <button class="tmn-library-use" type="button">Usar como nota activa</button>
+            <button class="tmn-library-link" type="button">Vincular solo para consultar</button>
             <button class="tmn-library-unlink" type="button">Desvincular</button>
           </div>
         </div>
@@ -2350,9 +2358,13 @@
     });
 
 
-    panel.querySelector('.tmn-library-toggle').addEventListener('click', () => {
-      setLibraryVisible(!libraryVisible);
-      if (libraryVisible) refreshLibrary().catch(error => setLibraryStatus(error.message));
+    panel.querySelector('.tmn-create-new').addEventListener('click', createNewActiveNote);
+    panel.querySelector('.tmn-choose-existing').addEventListener('click', () => {
+      setLibraryVisible(true);
+      refreshLibrary().catch(error => setLibraryStatus(error.message));
+    });
+    panel.querySelector('.tmn-library-use').addEventListener('click', () => {
+      adoptSelectedDocument().catch(error => setLibraryStatus(error.message));
     });
     panel.querySelector('.tmn-library-back').addEventListener('click', () => setLibraryVisible(false));
     panel.querySelector('.tmn-library-refresh').addEventListener('click', () => {
@@ -2707,7 +2719,7 @@
       const row = document.createElement('button');
       row.type = 'button';
       row.textContent =
-        (linkedFiles.includes(name) ? 'Vinculada · ' : '') +
+        (activeState?.sharedFilename === name ? 'Activa · ' : linkedFiles.includes(name) ? 'Vinculada · ' : '') +
         name + (entry ? '' : ' (no encontrado)');
       row.setAttribute('aria-current', String(selectedLibraryFile?.name === name));
       row.addEventListener('click', () => {
@@ -2731,6 +2743,9 @@
     const isLinked = linkedFiles.includes(selected.name);
     panel.querySelector('.tmn-library-link').hidden = isLinked;
     panel.querySelector('.tmn-library-unlink').hidden = !isLinked;
+    panel.querySelector('.tmn-library-use').disabled =
+      selected.name === activeState?.sharedFilename &&
+      activeState.sharedDirectoryId === directoryId;
   }
 
   async function refreshLibrary() {
@@ -2775,6 +2790,95 @@
     }
     renderLibrary();
     setLibraryStatus(libraryFiles.length + ' archivo(s) Markdown encontrados.');
+  }
+
+
+  function splitSavedMarkdownDocument(raw) {
+    const text = String(raw || '');
+    const metaMatch = /^---\r?\n([\s\S]*?)\r?\n---\r?\n/.exec(text);
+    if (!metaMatch) return { prefix: '', body: text.trimEnd() };
+    let cursor = metaMatch[0].length;
+    const titleMatch = /^title:\s*(.*)$/m.exec(metaMatch[1]);
+    let title = null;
+    if (titleMatch) {
+      try { title = JSON.parse(titleMatch[1].trim()); }
+      catch { title = titleMatch[1].trim(); }
+    }
+    if (/^\r?\n/.test(text.slice(cursor))) cursor += text.slice(cursor).match(/^\r?\n/)[0].length;
+    const heading = /^# ([^\r\n]+)\r?\n(?:\r?\n)?/.exec(text.slice(cursor));
+    if (heading && typeof title === 'string' && heading[1] === title) cursor += heading[0].length;
+    return { prefix: text.slice(0,cursor), body: text.slice(cursor).trimEnd() };
+  }
+
+  function updateSavedMarkdownBody(raw, body) {
+    const prefix = splitSavedMarkdownDocument(raw).prefix;
+    const contents = String(body || '').trimEnd();
+    return prefix + (contents ? contents + (raw.includes('\r\n') ? '\r\n' : '\n') : '');
+  }
+
+
+  function assertSharedFileRevision(current, expected) {
+    if (current !== expected) {
+      throw new Error('Conflicto: este archivo cambió desde que lo abriste. Conservamos tus cambios locales; actualiza Biblioteca para comparar.');
+    }
+  }
+
+  function hasUnsavedDraftToReplace() {
+    return Boolean(activeState && isDirty() && (activeState.body.trim() || currentFilename()));
+  }
+
+  function createNewActiveNote() {
+    if (!activeState) return;
+    if (hasUnsavedDraftToReplace() &&
+        !window.confirm('Hay cambios sin guardar. ¿Descartar el borrador y crear una nueva nota?')) return;
+    clearTimeout(draftSaveTimer);
+    activeState = createEmptyState();
+    selectedLibraryFile = null;
+    setLibraryVisible(false);
+    renderAll();
+    scheduleDraftPersistence();
+    panel?.querySelector('.tmn-file-name')?.focus();
+  }
+
+  async function adoptSelectedDocument() {
+    if (!selectedLibraryFile || !activeState || !directoryHandle || !directoryId) return;
+    const previousKey = activeChatKey;
+    const currentDir = directoryId;
+    const filename = selectedLibraryFile.name;
+    if (hasUnsavedDraftToReplace() &&
+        !window.confirm('La nota actual tiene cambios sin guardar. ¿Sustituirla por este archivo?')) return;
+    let raw = await readMarkdownFile(filename);
+    if (previousKey !== activeChatKey || currentDir !== directoryId) return;
+    if (previousKey.startsWith('chat:') && !linkedFiles.includes(filename)) {
+      await changeLibraryLink(true);
+      if (previousKey !== activeChatKey || currentDir !== directoryId) return;
+      raw = await readMarkdownFile(filename);
+    }
+    const metadata = parseMarkdownMetadata(raw);
+    const body = splitSavedMarkdownDocument(raw).body;
+    const mode = isCornellBody(body) ? 'cornell' : 'freeform';
+    const note = normalizeState({
+      ...createEmptyState(),
+      manualFilename: filename,
+      filename,
+      sharedFilename: filename,
+      sharedDirectoryId: currentDir,
+      sharedFileSnapshot: raw,
+      body,
+      savedBody: body,
+      originChatId: metadata.originChatId,
+      originChatUrl: metadata.originChatUrl,
+      noteMode: mode,
+      savedNoteMode: mode,
+      lastSavedAt: localIsoTimestamp()
+    });
+    if (previousKey !== activeChatKey || currentDir !== directoryId) return;
+    clearTimeout(draftSaveTimer);
+    activeState = note;
+    await persistActiveState();
+    setLibraryVisible(false);
+    renderAll();
+    setStatus('Documento existente activo. Guardar cambios actualizará este archivo.', 'success');
   }
 
   async function openLibraryFile(filename) {
@@ -3149,9 +3253,47 @@
         activeState.createdAt = localIsoTimestamp();
       }
 
+      if (activeState.sharedFilename) {
+        const scopeKey = activeChatKey;
+        const scopeDirectoryId = directoryId;
+        const state = activeState;
+        if (state.sharedDirectoryId !== directoryId)
+          throw new Error('La carpeta cambió. Vuelve a elegir el documento desde Biblioteca.');
+        if (targetFilename !== state.sharedFilename)
+          throw new Error('El documento vinculado conserva su nombre. Usa Crear nuevo para otro archivo.');
+        if (typeof state.sharedFileSnapshot !== 'string')
+          throw new Error('No hay una versión base del documento. Vuelve a abrirlo desde Biblioteca.');
+        const current = await readMarkdownFile(targetFilename);
+        if (scopeKey !== activeChatKey || scopeDirectoryId !== directoryId || state !== activeState)
+          throw new Error('Cambió el chat durante el guardado. Repite la operación.');
+        assertSharedFileRevision(current, state.sharedFileSnapshot);
+
+        let nextContent = updateSavedMarkdownBody(current, state.body);
+        const chatUrl = validChatUrl(getChatUrl());
+        if (scopeKey.startsWith('chat:') && chatUrl)
+          nextContent = withLinkedChatUrl(nextContent, chatUrl, true);
+        await rewriteMetadata(targetFilename, current, nextContent);
+        state.sharedFileSnapshot = nextContent;
+        state.savedBody = state.body;
+        state.lastSavedAt = localIsoTimestamp();
+        await persistActiveState();
+        if (scopeKey.startsWith('chat:') && !linkedFiles.includes(targetFilename)) {
+          linkedFiles = [...linkedFiles, targetFilename];
+          try { await persistChatLinks(linkedFiles, scopeKey); }
+          catch (error) { console.warn('[Markdown Notes] Índice de vínculos:', error); }
+        }
+        renderLibrary();
+        setStatus('Cambios guardados en el documento existente.', 'success');
+        return;
+      }
+
       let existingText = null;
       try { existingText = await readMarkdownFile(targetFilename); }
       catch (error) { if (error?.name !== 'NotFoundError') throw error; }
+      if (existingText !== null &&
+          (!activeState.filename || activeState.filename !== targetFilename)) {
+        throw new Error('Ya existe un documento con ese nombre. Elige otro nombre o ábrelo desde Elegir existente.');
+      }
       const previous = parseMarkdownMetadata(existingText);
       // The provenance already recorded on disk is authoritative. Never
       // replace it with the active conversation just because the file is edited.
@@ -3231,6 +3373,13 @@
     activeChatKey = chatKey;
     activeState = await loadState(chatKey);
     linkedFiles = await loadChatLinks(chatKey);
+    if (activeState.sharedFilename &&
+        activeState.sharedDirectoryId === directoryId &&
+        chatKey.startsWith('chat:') &&
+        !linkedFiles.includes(activeState.sharedFilename)) {
+      linkedFiles = [...linkedFiles, activeState.sharedFilename];
+      await persistChatLinks(linkedFiles, chatKey);
+    }
     selectedLibraryFile = null;
     renderAll();
     renderLibrary();
@@ -3337,7 +3486,7 @@
 
       setPanelWidth(currentWidth, false);
     });
-    console.info('[ChatGPT Markdown Notes] v1.9.0 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.10.0 cargado');
   }
 
   bootstrap().catch(error => {
