@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.9.0
+// @version      1.9.1
 // @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -478,18 +478,63 @@
     scheduleDraftPersistence();
   }
 
-  function selectTextInFreeformEditor(text, fromEnd = false) {
+  function selectRangeInFreeformEditor(start, end) {
     const editor = panel?.querySelector('.tmn-editor');
     if (!editor) return false;
 
-    const value = editor.value;
-    const index = fromEnd ? value.lastIndexOf(text) : value.indexOf(text);
-    if (index < 0) return false;
-
-    editor.focus();
-    editor.setSelectionRange(index, index + text.length);
+    // Do not let focusing the fixed notes panel move ChatGPT's page viewport.
+    editor.focus({ preventScroll: true });
+    editor.setSelectionRange(start, end);
     rememberMarkdownSelection(editor);
     return true;
+  }
+
+  // Insert only the new Cue heading; never serialize the existing note again.
+  function insertCornellCuePreservingWhitespace(raw, label = 'Pregunta o concepto') {
+    const original = String(raw ?? '');
+    const eol = original.match(/\r\n|\n|\r/)?.[0] || '\n';
+    const heading = '### Cue: ' + label;
+    const analysis = analyzeCornellCompatibility(original);
+
+    if (analysis.state === 'ready') {
+      // Alternating original lines and their exact line breaks preserves CRLF
+      // and even mixed line endings before the insertion point.
+      const parts = original.split(/(\r\n|\n|\r)/);
+      const lines = parts.filter((_, index) => index % 2 === 0);
+      const structure = findCornellStructure(lines);
+      if (structure.summaryIndex < 0) return null;
+
+      let offset = 0;
+      for (let i = 0; i < structure.summaryIndex; i += 1) {
+        offset += parts[2 * i].length + (parts[2 * i + 1] || '').length;
+      }
+
+      const before = original.slice(0, offset);
+      const separator = before.endsWith(eol + eol)
+        ? ''
+        : before.endsWith(eol) ? eol : eol + eol;
+      const inserted = separator + heading + eol + eol;
+      const selectionStart = offset + separator.length + '### Cue: '.length;
+      return {
+        body: before + inserted + original.slice(offset),
+        selectionStart,
+        selectionEnd: selectionStart + label.length
+      };
+    }
+
+    // Wrap arbitrary Libre content verbatim, without trimming whitespace.
+    const prefix = '## Cornell Notes' + eol + eol +
+      (original ? '### Cue: Nota' + eol + eol : '');
+    const separator = !original || original.endsWith(eol + eol)
+      ? ''
+      : original.endsWith(eol) ? eol : eol + eol;
+    const beforeCue = prefix + original + separator;
+    const selectionStart = beforeCue.length + '### Cue: '.length;
+    return {
+      body: beforeCue + heading + eol + eol + '## Summary',
+      selectionStart,
+      selectionEnd: selectionStart + label.length
+    };
   }
 
   function prepareCornellFromLibre() {
@@ -519,25 +564,24 @@
   function addCornellCueFromLibre() {
     if (!activeState || activeState.noteMode !== 'freeform') return;
 
-    prepareCornellBody();
+    const insertion = insertCornellCuePreservingWhitespace(activeState.body);
+    if (!insertion) {
+      setStatus('No se pudo encontrar el resumen Cornell para añadir la pregunta.', 'error');
+      return;
+    }
 
-    const parsed = parseCornellBody(activeState.body);
+    const parsed = parseCornellBody(insertion.body);
     if (!parsed) {
       setStatus('No se pudo preparar una estructura Cornell válida.', 'error');
       return;
     }
 
-    parsed.blocks.push(createCornellBlock({
-      cue: 'Pregunta o concepto',
-      notes: ''
-    }));
-
+    activeState.body = insertion.body;
     activeState.cornell = normalizeCornellState(parsed);
-    activeState.body = serializeCornellBody(activeState.cornell);
     persistSemanticCornellEdit();
 
     requestAnimationFrame(() => {
-      selectTextInFreeformEditor('Pregunta o concepto', true);
+      selectRangeInFreeformEditor(insertion.selectionStart, insertion.selectionEnd);
     });
   }
 
@@ -3337,7 +3381,7 @@
 
       setPanelWidth(currentWidth, false);
     });
-    console.info('[ChatGPT Markdown Notes] v1.9.0 cargado');
+    console.info('[ChatGPT Markdown Notes] v1.9.1 cargado');
   }
 
   bootstrap().catch(error => {
