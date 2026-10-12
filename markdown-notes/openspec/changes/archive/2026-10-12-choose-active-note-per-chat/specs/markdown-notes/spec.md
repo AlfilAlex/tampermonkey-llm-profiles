@@ -1,6 +1,6 @@
 # Active document selection — delta specification
 
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: Active document may be new or reused
 The notes panel SHALL let each chat choose to create a new document or adopt a saved Markdown document as the active editable note.

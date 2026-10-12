@@ -358,3 +358,193 @@ Cornell mode MUST reuse the existing file destination and filename mechanisms.
 - **WHEN** the user attempts to save
 - **THEN** Markdown Notes SHALL use the existing permission request or error behavior
 - **AND** SHALL keep the browser draft intact if filesystem writing does not complete.
+
+### Requirement: Stable document origin
+Markdown Notes SHALL retain the first successfully saved chat as the origin of an authored Markdown document.
+
+#### Scenario: Initial save in a conversation
+- **GIVEN** the user creates a note in conversation A
+- **WHEN** the file is saved for the first time
+- **THEN** the file SHALL contain the origin's `chat_id` and `chat_url` if available.
+
+#### Scenario: Save after origin is recorded
+- **GIVEN** a document has an existing origin
+- **WHEN** the document is saved or associated from another chat
+- **THEN** the origin fields SHALL not be replaced by the active chat.
+
+#### Scenario: Legacy document
+- **GIVEN** a document already has `chat_id` and `chat_url`
+- **WHEN** the document is listed or linked
+- **THEN** these existing values SHALL be treated as its historical origin.
+- **AND** they SHALL not be inferred from the current chat if absent.
+
+### Requirement: Browse authorized Markdown library
+Markdown Notes SHALL allow browsing `.md` files located directly in the user-selected directory without requesting access to other directories.
+
+#### Scenario: List files
+- **GIVEN** directory read access is available
+- **WHEN** the user opens the library
+- **THEN** the interface SHALL list Markdown filenames in that directory.
+
+#### Scenario: No permission or missing folder
+- **GIVEN** the selected directory is unavailable or permission is denied
+- **WHEN** the user opens the library
+- **THEN** Markdown Notes SHALL show an actionable error without discarding existing drafts.
+
+### Requirement: Safe read-only document preview
+Markdown Notes SHALL show a selected file in a viewer that does not execute HTML or scripts contained in the document and does not replace the chat's editable draft.
+
+#### Scenario: Preview existing file
+- **WHEN** the user selects a Markdown file in the library
+- **THEN** its contents and original chat link (when valid) SHALL be available for inspection
+- **AND** no file write or ChatGPT message submission SHALL occur.
+
+#### Scenario: Preview externally modified file
+- **GIVEN** a file has changed on disk
+- **WHEN** it is opened again
+- **THEN** the viewer SHALL read the current file from the directory rather than a stale saved body.
+
+### Requirement: Associate and disassociate a file with a conversation
+Markdown Notes SHALL allow multiple saved files to be associated with one chat and a saved file to be associated with multiple chats, without duplicating that file.
+
+#### Scenario: Link file from another conversation
+- **GIVEN** a document was authored in conversation A
+- **WHEN** the user links it to conversation B
+- **THEN** B SHALL list it among associated documents after reload
+- **AND** A SHALL remain the origin
+- **AND** the editable draft of B SHALL remain unchanged.
+
+#### Scenario: Repeat linking
+- **WHEN** a user links the same filename to the same chat again
+- **THEN** the association SHALL remain a single entry.
+
+#### Scenario: Remove association
+- **WHEN** the user unlinks a saved file from the active chat
+- **THEN** the file SHALL remain on disk
+- **AND** its origin and associations with other chats SHALL remain intact.
+
+#### Scenario: Existing local file no longer exists
+- **GIVEN** an associated document has been deleted or moved
+- **WHEN** the user attempts to view it
+- **THEN** Markdown Notes SHALL report that it is unavailable rather than silently replacing it.
+
+### Requirement: Portable associations and safe metadata updates
+Markdown Notes SHALL maintain human-readable linked-chat metadata in each associated Markdown file and a local per-chat index, without silently rewriting the document body.
+
+#### Scenario: Explicit link changes metadata
+- **WHEN** the user authorizes linking a file to a chat
+- **THEN** the link SHALL be recorded as a `linked_chat_urls` entry in the file's front matter
+- **AND** in the active chat's IndexedDB association index after a successful write.
+
+#### Scenario: File write is denied
+- **GIVEN** an existing Markdown file cannot be written
+- **WHEN** the user tries to link or unlink it
+- **THEN** the UI SHALL report the failure
+- **AND** SHALL not claim the association was saved.
+
+#### Scenario: Legacy file has no front matter
+- **GIVEN** a plain Markdown document without YAML metadata
+- **WHEN** the user explicitly links it
+- **THEN** a minimal front matter MAY be added without changing its original body.
+
+### Requirement: Active document may be new or reused
+The notes panel SHALL let each chat choose to create a new document or adopt a saved Markdown document as the active editable note.
+
+#### Scenario: Create new
+- **WHEN** the user selects Crear nuevo
+- **THEN** the chat SHALL present an empty note with no existing file selected.
+
+#### Scenario: Reuse existing document
+- **WHEN** the user selects an existing Markdown file and presses Usar como nota activa
+- **THEN** the existing document SHALL become editable in the current chat
+- **AND** subsequent saves SHALL update that same file without creating a copy.
+
+#### Scenario: Protect unsaved draft
+- **GIVEN** the current chat contains unsaved work
+- **WHEN** another document is selected
+- **THEN** the user SHALL be prompted before that draft is replaced.
+
+### Requirement: Persist active selection per conversation
+The selected filename and pending unsaved text SHALL survive reload and switching conversations.
+
+#### Scenario: Chat becomes permanent
+- **GIVEN** an existing file was adopted while the chat had a temporary identity
+- **WHEN** ChatGPT assigns a permanent /c/ ID
+- **THEN** the selection and draft SHALL migrate with the chat.
+
+### Requirement: Preserve shared document provenance and format
+Editing a reused document SHALL NOT change its original chat attribution or unrelated front matter.
+
+#### Scenario: Different chat edits reused note
+- **GIVEN** a note was created in chat A
+- **WHEN** chat B adopts and saves edits
+- **THEN** the file SHALL retain A's chat_id and chat_url
+- **AND** a Cornell document SHALL keep its canonical Cornell body.
+
+### Requirement: Prevent conflicting writes
+The userscript SHALL reject saving a reused file when its current content differs from the file version originally loaded.
+
+#### Scenario: Another editor changes the file
+- **WHEN** a chat attempts to save stale changes
+- **THEN** saving SHALL fail with an explicit conflict explanation
+- **AND** the local unsaved draft SHALL remain intact.
+
+### Requirement: Keep preview separate from editor
+Previewing a library file SHALL not change the current draft.
+
+#### Scenario: Read-only preview
+- **WHEN** a document is previewed
+- **THEN** it SHALL remain read-only until the user explicitly selects Usar como nota activa.
+
+### Requirement: Prevent accidental filename collisions
+A new document SHALL NOT silently overwrite an unrelated existing Markdown file.
+
+#### Scenario: Filename already exists
+- **WHEN** a new note is first saved using a filename already on disk
+- **THEN** the user SHALL be asked to select a different name or adopt the file.
+
+### Requirement: Non-destructive Cue insertion in Libre mode
+
+When the user activates **+ Cue / Pregunta**, Markdown Notes MUST insert only a new Cornell Cue heading and any immediately necessary separator characters. It MUST NOT reserialize, trim, or otherwise change any pre-existing text, spacing, indentation, or line-ending sequences.
+
+#### Scenario: Existing Cornell note has intentional blank lines
+- **GIVEN** a valid Cornell note with several consecutive blank lines within a block and its summary
+- **WHEN** the user activates **+ Cue / Pregunta**
+- **THEN** the pre-existing block and summary text MUST be byte-for-byte identical to before the action
+- **AND** the new Cue MUST appear before the final `## Summary`.
+
+#### Scenario: Repeat insertion
+- **GIVEN** an existing note containing the Cue placeholder
+- **WHEN** the user inserts another Cue
+- **THEN** the existing placeholder and all prior text MUST remain unchanged
+- **AND** a new Cue placeholder MUST be inserted exactly once.
+
+#### Scenario: Freeform document
+- **GIVEN** a document with no Cornell structure and several blank lines or indentation
+- **WHEN** the user adds a Cue
+- **THEN** the original Markdown MUST remain a contiguous, unmodified substring in the resulting Cornell document
+- **AND** the document MUST remain parseable by the existing Cornell parser.
+
+#### Scenario: Windows line endings
+- **GIVEN** an existing Cornell document uses CRLF line endings
+- **WHEN** the user adds a Cue
+- **THEN** existing CRLF sequences MUST be preserved
+- **AND** the inserted lines MUST use the same line-ending style.
+
+### Requirement: Cue insertion must not scroll the surrounding ChatGPT page
+
+Markdown Notes MUST focus and select the inserted Cue without causing a jump in the page or conversation scroll position.
+
+#### Scenario: User is reading midway through a long conversation
+- **GIVEN** ChatGPT is scrolled away from the top
+- **WHEN** the user presses **+ Cue / Pregunta**
+- **THEN** the page/ChatGPT conversation viewport MUST remain at its previous scroll position
+- **AND** the new Cue text MUST be selected in the note editor.
+
+### Requirement: Persist edits after safe insertion
+
+The insertion MUST continue to mark the note as changed and schedule normal local-draft persistence.
+
+#### Scenario: Reload after adding a Cue
+- **WHEN** the user adds a Cue and the local draft persistence completes
+- **THEN** the edited note MUST be restored without losing its original whitespace.
