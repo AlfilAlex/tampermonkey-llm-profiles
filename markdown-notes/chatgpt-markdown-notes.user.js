@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.11.0
+// @version      1.12.0
 // @description  Notas Markdown locales por conversación ChatGPT o video de Udemy, con Cornell y biblioteca.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -28,9 +28,16 @@
 
   const PANEL_OPEN_KEY = `${APP}:panel-open`;
   const PANEL_WIDTH_KEY = `${APP}:panel-width`;
+  const PANEL_LAYOUT_KEY = `${APP}:panel-layout`;
+  const BOTTOM_HEIGHT_KEY = `${APP}:bottom-height`;
+  const FLOAT_RECT_KEY = `${APP}:float-rect`;
   const DEFAULT_PANEL_WIDTH = 430;
   const MIN_PANEL_WIDTH = 300;
   const MAX_PANEL_WIDTH = 760;
+  const DEFAULT_BOTTOM_HEIGHT = 390;
+  const DEFAULT_FLOAT_WIDTH = 520;
+  const DEFAULT_FLOAT_HEIGHT = 580;
+  const PANEL_MARGIN = 8;
   const NEW_CHAT_SESSION_KEY = `${APP}:new-chat-session-key`;
 
   let directoryHandle = null;
@@ -49,6 +56,9 @@
   let draftSaveTimer = null;
   let navigationTimer = null;
   let resizing = false;
+  let panelLayout = 'side';
+  let bottomPanelHeight = DEFAULT_BOTTOM_HEIGHT;
+  let floatingRect = null;
 
   let reviewIndex = 0;
   let reviewRevealed = false;
@@ -2321,7 +2331,7 @@
     panel.hidden = true;
 
     panel.innerHTML = `
-      <div class="tmn-resizer" title="Arrastra para cambiar el ancho"></div>
+      <div class="tmn-resizer" title="Arrastra para cambiar el tamaño del panel"></div>
 
       <div class="tmn-header">
         <div class="tmn-heading">
@@ -2336,6 +2346,13 @@
         </div>
 
         <div class="tmn-header-actions">
+          <label class="tmn-layout-label" for="${APP}-layout">Posición</label>
+          <select id="${APP}-layout" class="tmn-layout-select" aria-label="Posición del panel">
+            <option value="side">Lateral</option>
+            <option value="bottom">Abajo</option>
+            <option value="floating">Flotante</option>
+          </select>
+          <button class="tmn-float-drag" type="button" title="Arrastra para mover la ventana, o usa las flechas" aria-label="Mover ventana flotante">Mover</button>
           <button class="tmn-close" type="button" title="Cerrar panel">✕</button>
         </div>
       </div>
@@ -2464,6 +2481,12 @@
       'pointerdown',
       startResize
     );
+    panel.querySelector('.tmn-layout-select').addEventListener('change', event => {
+      setPanelLayout(event.target.value);
+    });
+    const dragHandle = panel.querySelector('.tmn-float-drag');
+    dragHandle.addEventListener('pointerdown', startFloatingDrag);
+    dragHandle.addEventListener('keydown', moveFloatingWithKeyboard);
 
     panel.querySelector('.tmn-close').addEventListener('click', () => {
       setPanelOpen(false);
@@ -3677,7 +3700,7 @@
 
       setPanelWidth(currentWidth, false);
     });
-    console.info('[Markdown Notes] v1.11.0 cargado', IS_UDEMY ? '(Udemy)' : '(ChatGPT)');
+    console.info('[Markdown Notes] v1.12.0 cargado', IS_UDEMY ? '(Udemy)' : '(ChatGPT)');
   }
 
   bootstrap().catch(error => {
