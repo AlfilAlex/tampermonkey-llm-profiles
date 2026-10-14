@@ -22,13 +22,20 @@ Cada userscript es un proyecto independiente y mantiene su propio OpenSpec:
 
 No existe un OpenSpec compartido en la raíz: compartir repositorio no implica compartir capabilities, almacenamiento ni runtime.
 
-## En diseño: Udemy Markdown Notes
+## Udemy dentro de Markdown Notes
 
-Proyecto independiente para tomar notas **por video de Udemy**, sin marcas de tiempo de reproducción.
+**No es otro plugin:** `markdown-notes/chatgpt-markdown-notes.user.js`
+(v1.11.0) funciona tanto en ChatGPT como en videos de Udemy.
 
-El alcance y los requisitos están en
-[`udemy-notes/openspec/changes/add-video-notes/`](udemy-notes/openspec/changes/add-video-notes/).
-El userscript de Udemy **todavía no está implementado**.
+En Udemy, cada URL `/course/<curso>/learn/lecture/<id>` mantiene su propio
+borrador, con **Crear nuevo** y **Elegir existente**, editor Libre/Cornell,
+Biblioteca y guardado local. No se guardan marcas de tiempo del video.
+
+El navegador separa IndexedDB y permisos de directorio por dominio:
+**hay que seleccionar la carpeta también desde Udemy**. El reproductor real
+y sus controles requieren prueba manual; el panel es superpuesto en Udemy.
+Los requisitos del cambio están en
+[`markdown-notes/openspec/changes/support-udemy-lectures/`](markdown-notes/openspec/changes/support-udemy-lectures/).
 
 ## Userscripts
 
@@ -40,7 +47,7 @@ El userscript de Udemy **todavía no está implementado**.
 - Mantiene ON/OFF y perfil seleccionado por conversación.
 
 
-### ChatGPT Markdown Notes v1.10.0
+### Markdown Notes v1.11.0 — ChatGPT y Udemy
 
 **Flujo de notas por conversación:** al abrir el panel puedes elegir **Crear nuevo** o **Elegir existente**. La segunda opción abre la Biblioteca; selecciona un archivo .md y pulsa **Usar como nota activa** para cargarlo en el editor Libre/Cornell. **Guardar cambios** actualiza ese mismo archivo, aunque lo estés usando desde otro chat.
 
