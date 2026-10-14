@@ -2879,50 +2879,56 @@
     );
   }
 
+
   function startResize(event) {
-    if (window.innerWidth <= 900) return;
-
+    if (window.innerWidth <= 900 || event.button !== 0) return;
+    const mode = effectivePanelLayout();
     event.preventDefault();
-
     resizing = true;
-    document.documentElement.classList.add(`${APP}-resizing`);
-
-    const startX = event.clientX;
-    const startingWidth = parseFloat(
-      getComputedStyle(document.documentElement)
-        .getPropertyValue('--tmn-notes-width')
-    ) || DEFAULT_PANEL_WIDTH;
-
-    const onMove = moveEvent => {
-      if (!resizing) return;
-
-      // Panel anclado a la derecha:
-      // mover el borde a la izquierda => panel más ancho.
-      const delta = startX - moveEvent.clientX;
-      setPanelWidth(startingWidth + delta, false);
+    document.documentElement.classList.add(APP + '-resizing');
+    const startX = event.clientX, startY = event.clientY;
+    const startWidth = parseFloat(getComputedStyle(document.documentElement)
+      .getPropertyValue('--tmn-notes-width')) || DEFAULT_PANEL_WIDTH;
+    const startBottomHeight = bottomPanelHeight;
+    const startFloat = { ...floatingRect };
+    const onMove = move => {
+      if (!resizing || move.pointerId !== event.pointerId) return;
+      if (mode === 'bottom') {
+        setBottomPanelHeight(startBottomHeight - (move.clientY - startY), false);
+      } else if (mode === 'floating') {
+        // Constrain size to viewport space remaining from the existing origin.
+        setFloatingPanelRect({
+          ...startFloat,
+          width: Math.max(160, Math.min(
+            startFloat.width + move.clientX - startX,
+            window.innerWidth - startFloat.left - PANEL_MARGIN
+          )),
+          height: Math.max(160, Math.min(
+            startFloat.height + move.clientY - startY,
+            window.innerHeight - startFloat.top - PANEL_MARGIN
+          ))
+        }, false);
+      } else {
+        setPanelWidth(startWidth + startX - move.clientX, false);
+      }
     };
-
-    const onUp = () => {
-      if (!resizing) return;
-
+    const finish = move => {
+      if (move.pointerId !== event.pointerId) return;
       resizing = false;
-      document.documentElement.classList.remove(`${APP}-resizing`);
-
-      const finalWidth = parseFloat(
-        getComputedStyle(document.documentElement)
-          .getPropertyValue('--tmn-notes-width')
-      ) || DEFAULT_PANEL_WIDTH;
-
-      setPanelWidth(finalWidth, true);
-
+      document.documentElement.classList.remove(APP + '-resizing');
+      if (mode === 'bottom') setBottomPanelHeight(bottomPanelHeight, true);
+      else if (mode === 'floating') setFloatingPanelRect(floatingRect, true);
+      else setPanelWidth(
+        parseFloat(getComputedStyle(document.documentElement)
+          .getPropertyValue('--tmn-notes-width')) || DEFAULT_PANEL_WIDTH, true
+      );
       window.removeEventListener('pointermove', onMove, true);
-      window.removeEventListener('pointerup', onUp, true);
-      window.removeEventListener('pointercancel', onUp, true);
+      window.removeEventListener('pointerup', finish, true);
+      window.removeEventListener('pointercancel', finish, true);
     };
-
     window.addEventListener('pointermove', onMove, true);
-    window.addEventListener('pointerup', onUp, true);
-    window.addEventListener('pointercancel', onUp, true);
+    window.addEventListener('pointerup', finish, true);
+    window.addEventListener('pointercancel', finish, true);
   }
 
   function setPanelOpen(open) {
@@ -3802,6 +3808,7 @@
     createLauncher();
     createPanel();
     restorePanelWidth();
+    restorePanelLayout();
 
     await loadSavedDirectoryHandle();
 
@@ -3833,8 +3840,8 @@
         getComputedStyle(document.documentElement)
           .getPropertyValue('--tmn-notes-width')
       ) || DEFAULT_PANEL_WIDTH;
-
       setPanelWidth(currentWidth, false);
+      applyPanelLayout();
     });
     console.info('[Markdown Notes] v1.12.0 cargado', IS_UDEMY ? '(Udemy)' : '(ChatGPT)');
   }
