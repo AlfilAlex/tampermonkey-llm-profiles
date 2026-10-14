@@ -1,6 +1,6 @@
 # Tampermonkey LLM Profiles
 
-Userscripts para extender ChatGPT en el navegador sin modificar el servicio en el servidor.
+Userscripts de Tampermonkey para perfiles de ChatGPT y notas Markdown en ChatGPT y Udemy. Todas las notas permanecen en el navegador o en archivos locales autorizados.
 
 ## Estructura del repositorio
 
