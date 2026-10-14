@@ -63,6 +63,25 @@ Markdown Notes SHALL preserve browser draft state independently from filesystem 
 - **THEN** Markdown Notes SHALL retain the browser draft
 - **AND** SHALL NOT mark the failed write as successfully saved.
 
+#### Scenario: Save from Libre
+
+- GIVEN a canonical note body exists
+- WHEN the user saves while Libre is selected
+- THEN the saved file SHALL contain that canonical body.
+
+#### Scenario: Save from Cornell or Repaso
+
+- GIVEN the same canonical note body exists
+- WHEN the user saves while Cornell or Repaso is selected
+- THEN the saved file SHALL contain the same canonical body representation.
+
+#### Scenario: Successful save updates baseline
+
+- GIVEN a filesystem write succeeds
+- WHEN save state is persisted
+- THEN `savedBody` SHALL become the current canonical body
+- AND dirty state SHALL no longer depend on a separate Cornell snapshot.
+
 ### Requirement: Filesystem directory and permission handling
 
 Markdown Notes SHALL save Markdown only through a user-selected browser-controlled directory handle.
@@ -83,118 +102,141 @@ Markdown Notes SHALL save Markdown only through a user-selected browser-controll
 
 ### Requirement: Conversation title identity
 
-Markdown Notes MUST distinguish a real detected ChatGPT conversation title from visual fallback text.
+Markdown Notes MUST NOT infer note identity from ChatGPT conversation-title sources.
 
-#### Scenario: Real title is available
+#### Scenario: ChatGPT has a generated conversation title
 
-- **GIVEN** the active conversation exposes a non-empty, non-generic title
-- **WHEN** Markdown Notes detects it
-- **THEN** the title SHALL become the authoritative note title
-- **AND** the detected title SHALL be persisted in the conversation draft state.
+- GIVEN ChatGPT displays a title derived from the conversation or first user message
+- AND the user has not entered a manual note name
+- WHEN Markdown Notes renders
+- THEN Markdown Notes SHALL NOT copy that title into its note header
+- AND SHALL NOT use it as Markdown document title
+- AND SHALL NOT use it as filesystem filename.
 
-#### Scenario: ChatGPT temporarily removes the title from the DOM
+#### Scenario: Document title and sidebar contain text
 
-- **GIVEN** Markdown Notes already adopted a real conversation title
-- **WHEN** a later ChatGPT re-render temporarily makes title detection fail
-- **THEN** Markdown Notes SHALL continue using the adopted title
-- **AND** SHALL NOT regress to the generic fallback.
-
-#### Scenario: No real title is available yet
-
-- **GIVEN** no non-generic conversation title can be detected
-- **WHEN** the panel renders
-- **THEN** the UI MAY show `Nota de ChatGPT`
-- **BUT** that fallback SHALL NOT be persisted as the authoritative conversation title.
+- GIVEN the ChatGPT page exposes sidebar, heading, or browser-title text
+- WHEN note identity is resolved
+- THEN those values SHALL NOT participate in note title or filename resolution.
 
 ### Requirement: Editable file identity
 
-Markdown Notes MUST expose the target Markdown filename as an editable value associated with the active conversation.
+Markdown Notes MUST use one explicit manual note name as the visible source for document title and filesystem filename.
 
-#### Scenario: User edits the filename
+#### Scenario: No manual note name
 
-- **GIVEN** a conversation note is active
-- **WHEN** the user edits the filename field
-- **THEN** the entered value SHALL become the manual filename override for that conversation
-- **AND** the override SHALL be persisted with the local draft state.
+- GIVEN no manual note name exists
+- WHEN the panel renders
+- THEN the note-name input SHALL be empty
+- AND Save SHALL remain disabled
+- AND no generated ID or ChatGPT-derived text SHALL be shown as a substitute.
 
-#### Scenario: User omits the extension
+#### Scenario: Manual note name is entered
 
-- **GIVEN** the user enters a non-empty manual filename without a `.md` suffix
-- **WHEN** the filename is normalized
-- **THEN** Markdown Notes SHALL append `.md`.
+- GIVEN the user enters `Routing Linux`
+- WHEN note identity is resolved
+- THEN the filesystem filename SHALL normalize to `Routing Linux.md`
+- AND the Markdown document title SHALL be `Routing Linux`.
+
+#### Scenario: Manual name contains md extension
+
+- GIVEN the user enters `Routing Linux.md`
+- WHEN the Markdown document title is generated
+- THEN the title SHALL be `Routing Linux`
+- AND the filename SHALL remain `Routing Linux.md`.
+
+#### Scenario: No manual filename exists
+
+- GIVEN a conversation draft exists
+- AND no valid manual filename has been provided
+- WHEN the panel renders
+- THEN the filename input SHALL be empty
+- AND the Save button SHALL be disabled
+- AND Markdown Notes SHALL NOT substitute the conversation title, chat ID, UUID, timestamp, or another generated name.
+
+#### Scenario: User provides filename without extension
+
+- GIVEN no valid filename exists
+- WHEN the user enters `routing-notes`
+- THEN Markdown Notes SHALL normalize the target to `routing-notes.md`
+- AND Save SHALL become available.
 
 #### Scenario: User clears the filename
 
-- **GIVEN** a manual filename override exists
-- **WHEN** the user clears the filename field and leaves it empty
-- **THEN** the manual override SHALL be removed
-- **AND** the displayed target filename SHALL return to automatic resolution.
+- GIVEN a valid manual filename exists
+- WHEN the user clears the filename field
+- THEN Save SHALL become unavailable again.
 
-#### Scenario: Title metadata remains independent
+#### Scenario: User edits the filename
 
-- **GIVEN** the conversation title differs from the manual filename
-- **WHEN** the Markdown document is generated
-- **THEN** the filesystem target SHALL use the manual filename
-- **AND** the Markdown title metadata SHALL continue to represent the conversation title.
+- GIVEN a conversation note is active
+- WHEN the user edits the filename field
+- THEN the entered value SHALL become the manual filename override for that conversation
+- AND the override SHALL be persisted with the local draft state.
 
-### Requirement: Automatic filename resolution
+#### Scenario: User omits the extension
 
-When there is no manual filename override, Markdown Notes MUST resolve the target filename using a stable priority order.
-
-#### Scenario: Real conversation title exists
-
-- **GIVEN** no manual filename override exists
-- **AND** a real conversation title has been detected or adopted
-- **WHEN** the target filename is resolved
-- **THEN** the filename SHALL be derived from the conversation title.
-
-#### Scenario: Title is unavailable but chat ID exists
-
-- **GIVEN** no manual filename override exists
-- **AND** no real conversation title is available
-- **AND** the URL contains a ChatGPT conversation ID
-- **WHEN** the target filename is resolved
-- **THEN** the full conversation ID SHALL be used as the filename stem
-- **AND** the filename SHALL end in `.md`.
-
-#### Scenario: Neither title nor chat ID exists
-
-- **GIVEN** no manual filename override exists
-- **AND** no real conversation title is available
-- **AND** no ChatGPT conversation ID is available
-- **WHEN** the target filename is resolved
-- **THEN** Markdown Notes SHALL use a local timestamp filename
-- **AND** the filename SHALL have the format `YYYY-MM-DD_HH-mm-ss.md`.
-
-#### Scenario: Manual filename wins over later title detection
-
-- **GIVEN** the user has set a manual filename
-- **WHEN** ChatGPT later exposes or changes the conversation title
-- **THEN** Markdown Notes SHALL keep the manual filename unchanged.
+- GIVEN the user enters a non-empty manual filename without a `.md` suffix
+- WHEN the filename is normalized
+- THEN Markdown Notes SHALL append `.md`.
 
 ### Requirement: Filename persistence and save semantics
 
-Markdown Notes MUST distinguish the desired target filename from the filename last written successfully.
+Markdown Notes MUST validate the manual filename before any filesystem save side effect.
 
-#### Scenario: Save succeeds
+#### Scenario: Save shortcut without filename
 
-- **GIVEN** a target filename has been resolved
-- **WHEN** the filesystem write succeeds
-- **THEN** the successfully written filename SHALL be stored as the last saved filename.
+- GIVEN no manual filename exists
+- WHEN the user invokes Cmd/Ctrl+S
+- THEN Markdown Notes SHALL NOT open a directory picker
+- AND SHALL NOT request filesystem write permission
+- AND SHALL NOT write a file
+- AND SHALL focus the filename input
+- AND SHALL communicate that the filename is required.
+
+#### Scenario: Legacy automatic filename exists
+
+- GIVEN a legacy draft has a last-saved `filename`
+- AND `manualFilename` is empty
+- WHEN the draft loads
+- THEN the legacy filename SHALL NOT count as an explicit filename choice
+- AND Save SHALL remain disabled until the user enters a manual name.
+
+#### Scenario: Manual filename save succeeds
+
+- GIVEN a valid manual filename exists
+- AND filesystem permission is granted
+- WHEN the user saves
+- THEN the normalized manual filename SHALL be the target written
+- AND the successful target SHALL become the stored last-written `filename`.
+
+#### Scenario: Legacy inferred title exists without manual name
+
+- GIVEN a legacy draft contains an inferred `noteTitle`
+- AND no manual note name exists
+- WHEN the draft loads
+- THEN Save SHALL remain disabled
+- AND the inferred title SHALL NOT populate the note-name field.
+
+#### Scenario: Save with manual name
+
+- GIVEN a valid manual note name exists
+- WHEN a filesystem save succeeds
+- THEN the saved Markdown title and filesystem filename SHALL both derive from that manual name.
 
 #### Scenario: Filename changes after a previous save
 
-- **GIVEN** a note was previously saved under one filename
-- **AND** the user changes the manual filename
-- **WHEN** the user saves again
-- **THEN** Markdown Notes SHALL write the new target filename
-- **AND** SHALL NOT automatically delete the previous file.
+- GIVEN a note was previously saved as `old-name.md`
+- AND the user changes the manual filename to `new-name.md`
+- WHEN the user saves again
+- THEN Markdown Notes SHALL write `new-name.md`
+- AND SHALL NOT automatically delete `old-name.md`.
 
 #### Scenario: Reload with manual filename
 
-- **GIVEN** a manual filename override was persisted for a conversation
-- **WHEN** the page reloads and that conversation is restored
-- **THEN** the editable filename field SHALL show the persisted manual filename.
+- GIVEN a manual filename override was persisted for a conversation
+- WHEN the page reloads and that conversation is restored
+- THEN the editable filename field SHALL show the persisted manual filename.
 
 ### Requirement: Per-conversation note mode
 
@@ -220,6 +262,50 @@ Markdown Notes MUST persist the selected note representation independently for e
 - **WHEN** the user switches between them
 - **THEN** each conversation SHALL restore its own persisted mode and draft state.
 
+#### Scenario: Cornell content is visible in Libre
+
+- GIVEN the user edits Cornell blocks
+- WHEN the user switches to Libre
+- THEN Libre SHALL display the Markdown representation of those same Cornell blocks and summary
+- AND SHALL NOT display an independent empty or stale freeform draft.
+
+#### Scenario: Libre changes are reflected in Cornell
+
+- GIVEN the current body is valid Cornell Markdown
+- AND the user edits that Markdown in Libre
+- WHEN the user returns to Cornell
+- THEN Markdown Notes SHALL rebuild the Cornell projection from the current body.
+
+#### Scenario: Switching views does not create a second note
+
+- GIVEN a conversation has one canonical body
+- WHEN the user switches among Libre, Cornell, and Repaso
+- THEN Markdown Notes SHALL retain one canonical browser document
+- AND mode switching alone SHALL NOT create an independent content history.
+
+#### Scenario: Non-empty Libre note is not Cornell-compatible
+
+- **GIVEN** Libre mode is active
+- **AND** the canonical body contains non-empty Markdown that does not match the supported Cornell structure
+- **WHEN** the user selects Cornell or Repaso
+- **THEN** Markdown Notes SHALL remain in Libre
+- **AND** SHALL explain that the note must first be prepared for Cornell
+- **AND** SHALL preserve the body unchanged.
+
+#### Scenario: Empty Libre note switches to Cornell
+
+- **GIVEN** Libre mode is active
+- **AND** the canonical body is empty
+- **WHEN** the user selects Cornell
+- **THEN** Markdown Notes MAY switch directly to Cornell without requiring preparation.
+
+#### Scenario: Cornell-compatible Libre note switches to Cornell
+
+- **GIVEN** Libre mode is active
+- **AND** the canonical body matches the supported Cornell Markdown structure
+- **WHEN** the user selects Cornell
+- **THEN** Markdown Notes SHALL reconstruct the Cornell projection and switch modes.
+
 ### Requirement: Structured Cornell blocks
 
 Cornell mode MUST represent content as an ordered collection of cue-and-notes blocks plus one summary.
@@ -243,6 +329,18 @@ Cornell mode MUST represent content as an ordered collection of cue-and-notes bl
 - **GIVEN** a Cornell block exists
 - **WHEN** the user intentionally deletes it
 - **THEN** that block SHALL be removed without changing the content of other blocks.
+
+#### Scenario: Cornell edit updates canonical body
+
+- GIVEN Cornell mode is active
+- WHEN the user edits a cue, notes body, or summary
+- THEN the canonical Markdown body SHALL be updated to represent that change.
+
+#### Scenario: Cornell reorder updates canonical body
+
+- GIVEN multiple Cornell blocks exist
+- WHEN the user reorders them
+- THEN the canonical Markdown body SHALL reflect the new block order.
 
 ### Requirement: Responsive Cornell layout
 
@@ -323,23 +421,59 @@ When Cornell mode is saved, Markdown Notes MUST serialize the structured draft t
 - **WHEN** the file is serialized
 - **THEN** that block SHALL NOT create an empty Markdown section.
 
+#### Scenario: Parse generated Cornell Markdown
+
+- GIVEN a canonical body follows the supported Cornell Markdown structure
+- WHEN Cornell mode is entered
+- THEN the block order, cues, notes, and summary SHALL be reconstructed from that body.
+
 ### Requirement: Freeform compatibility
 
-Adding Cornell mode MUST NOT destructively transform existing freeform content.
+Libre MUST provide semantic assistance for producing Cornell-compatible Markdown without requiring knowledge of Markdown heading levels.
 
-#### Scenario: Switch from freeform to Cornell
+#### Scenario: Libre note is not structured for Cornell
 
-- **GIVEN** a freeform body exists
-- **WHEN** the user switches to Cornell mode
-- **THEN** the freeform body SHALL remain stored unchanged
-- **AND** Markdown Notes SHALL NOT automatically parse or delete it.
+- **GIVEN** Libre contains arbitrary non-empty Markdown
+- **WHEN** the editor renders
+- **THEN** the UI SHALL indicate that the note is not yet Cornell-structured
+- **AND** SHALL expose an explicit `Preparar Cornell` action.
 
-#### Scenario: Return to freeform
+#### Scenario: Prepare arbitrary Libre note
 
-- **GIVEN** Cornell content exists
-- **AND** a freeform body existed previously
-- **WHEN** the user returns to freeform mode
-- **THEN** the previous freeform body SHALL be restored unchanged.
+- **GIVEN** arbitrary Libre Markdown is not Cornell-compatible
+- **WHEN** the user activates `Preparar Cornell`
+- **THEN** Markdown Notes SHALL preserve the complete existing body inside a neutral Cornell notes block
+- **AND** SHALL produce canonical Cornell Markdown
+- **AND** SHALL NOT write to the filesystem as a side effect.
+
+#### Scenario: Prepare empty Libre note
+
+- **GIVEN** the Libre body is empty
+- **WHEN** the user activates `Preparar Cornell`
+- **THEN** Markdown Notes SHALL create a valid empty Cornell document structure
+- **AND** SHALL keep filesystem state unchanged.
+
+## ADDED Requirements
+
+#### Scenario: Legacy draft contains only freeform body
+
+- GIVEN a legacy draft contains freeform body content and no meaningful Cornell content
+- WHEN the draft is loaded
+- THEN the freeform body SHALL remain the canonical body unchanged.
+
+#### Scenario: Legacy draft contains only Cornell content
+
+- GIVEN a legacy draft has meaningful Cornell content and an empty freeform body
+- WHEN the draft is loaded
+- THEN Markdown Notes SHALL serialize the Cornell content into the canonical body.
+
+#### Scenario: Legacy draft contains both independent contents
+
+- GIVEN a legacy draft contains non-empty freeform body and meaningful Cornell content
+- AND the body is not already valid Cornell Markdown
+- WHEN the draft is normalized
+- THEN Markdown Notes SHALL preserve the previous freeform body and Cornell content in one Cornell document
+- AND SHALL NOT discard either representation.
 
 ### Requirement: Cornell reuses existing filesystem and filename behavior
 
@@ -548,3 +682,417 @@ The insertion MUST continue to mark the note as changed and schedule normal loca
 #### Scenario: Reload after adding a Cue
 - **WHEN** the user adds a Cue and the local draft persistence completes
 - **THEN** the edited note MUST be restored without losing its original whitespace.
+
+### Requirement: Internal draft identity
+
+Every browser draft MUST have a unique internal identifier independent from its visible note name.
+
+#### Scenario: New draft
+
+- GIVEN a new browser draft is created
+- WHEN its state is initialized
+- THEN Markdown Notes SHALL assign a unique internal `noteId`.
+
+#### Scenario: Legacy draft without noteId
+
+- GIVEN an existing persisted draft has no `noteId`
+- WHEN it is normalized
+- THEN Markdown Notes SHALL generate a `noteId`
+- AND SHALL preserve existing body, Cornell, filename, and manual-name state.
+
+#### Scenario: Internal ID remains invisible
+
+- GIVEN a draft has an internal `noteId`
+- WHEN the panel renders or the note is saved
+- THEN `noteId` SHALL NOT be used as visible note title
+- AND SHALL NOT be used as filesystem filename.
+
+### Requirement: Cornell structure assistant
+
+Libre mode MUST expose semantic Cornell structure controls separate from generic Markdown formatting.
+
+#### Scenario: Cornell compatibility status
+
+- **GIVEN** Libre mode is active
+- **WHEN** the canonical body is evaluated
+- **THEN** the UI SHALL distinguish empty, arbitrary Libre, and Cornell-compatible states.
+
+#### Scenario: Cornell-compatible status includes block count
+
+- **GIVEN** a canonical Cornell body contains N parsed blocks
+- **WHEN** Libre renders
+- **THEN** the assistant SHALL communicate that Cornell is ready
+- **AND** SHALL include the detected block count.
+
+#### Scenario: Assistant hidden outside Libre
+
+- **GIVEN** Cornell or Repaso mode is active
+- **WHEN** the editor renders
+- **THEN** the Libre structure assistant SHALL be hidden.
+
+### Requirement: Semantic cue insertion
+
+Libre MUST allow users to add Cornell cues without manually constructing Markdown headings.
+
+#### Scenario: Add cue to Cornell-ready note
+
+- **GIVEN** Libre contains canonical Cornell Markdown
+- **WHEN** the user activates `+ Cue / Pregunta`
+- **THEN** Markdown Notes SHALL insert a new Cornell block before Summary
+- **AND** SHALL insert a semantic `### Cue: ...` heading without reserializing unrelated Markdown
+- **AND** SHALL focus/select the cue placeholder for immediate replacement.
+
+#### Scenario: Add cue to arbitrary Libre note
+
+- **GIVEN** Libre contains non-Cornell Markdown
+- **WHEN** the user activates `+ Cue / Pregunta`
+- **THEN** Markdown Notes SHALL first preserve the existing body through Cornell preparation
+- **AND** SHALL then add the new cue block.
+
+### Requirement: Semantic summary navigation
+
+Libre MUST provide direct navigation to the Cornell summary without requiring the user to find or create its Markdown heading.
+
+#### Scenario: Go to existing summary
+
+- **GIVEN** canonical Cornell Markdown exists
+- **WHEN** the user activates `Ir a resumen`
+- **THEN** the Libre textarea SHALL receive focus
+- **AND** the caret SHALL move to the Summary body.
+
+#### Scenario: Go to summary from arbitrary Libre
+
+- **GIVEN** the note is not yet Cornell-compatible
+- **WHEN** the user activates `Ir a resumen`
+- **THEN** Markdown Notes SHALL prepare the note non-destructively
+- **AND** SHALL move the caret to the generated Summary body.
+
+### Requirement: Cornell structure guidance
+
+Libre MUST explain Cornell semantics without requiring the user to understand internal heading levels.
+
+#### Scenario: User opens structure help
+
+- **GIVEN** Libre mode is active
+- **WHEN** the user expands the Cornell structure help
+- **THEN** the UI SHALL explain Cue/Pregunta, notes content, and Summary
+- **AND** SHALL state that H1/H2/H3 are not required for Cornell conversion.
+
+#### Scenario: Generic heading controls
+
+- **GIVEN** the Markdown toolbar is visible
+- **WHEN** heading controls are rendered
+- **THEN** their visible labels SHALL describe generic document structure rather than implying Cornell semantics
+- **AND** accessible labels/tooltips SHALL still identify the corresponding Markdown heading level.
+
+### Requirement: Semantic Cornell Markdown cues
+
+New Cornell serialization MUST make cue boundaries understandable in raw Libre Markdown while remaining backward compatible.
+
+#### Scenario: New Cornell serialization
+
+- **GIVEN** a Cornell block has a cue
+- **WHEN** Markdown Notes serializes the canonical body
+- **THEN** the block SHALL use a `### Cue: ...` heading
+- **AND** block identity SHALL NOT depend on persisted numeric ordering.
+
+#### Scenario: Legacy numbered Cornell body
+
+- **GIVEN** an existing canonical body uses legacy numbered `### N. ...` cue headings
+- **WHEN** Markdown Notes parses the body
+- **THEN** the existing cues and notes SHALL remain reconstructable.
+
+#### Scenario: Generic numbered heading inside semantic Cornell notes
+
+- **GIVEN** a semantic Cornell block contains an ordinary numbered H3 heading in its notes
+- **WHEN** the body is parsed
+- **THEN** that heading SHALL remain note content
+- **AND** SHALL NOT create another Cornell block.
+
+### Requirement: Local Cornell block actions
+
+Cornell mode MUST provide block-local insertion and guarded deletion controls.
+
+#### Scenario: Insert block after current block
+
+- **GIVEN** a Cornell block exists
+- **WHEN** the user activates its compact add control
+- **THEN** Markdown Notes SHALL insert a new blank block immediately after that block
+- **AND** SHALL preserve the order and content of all existing blocks
+- **AND** SHALL focus the new block's Cue / Question field.
+
+#### Scenario: Append action remains available
+
+- **GIVEN** Cornell mode is active
+- **WHEN** the editor renders
+- **THEN** the existing append-at-end block action SHALL remain available in addition to block-local insertion.
+
+#### Scenario: First delete activation does not delete
+
+- **GIVEN** a Cornell block exists
+- **WHEN** the user activates Delete once
+- **THEN** the block SHALL remain unchanged
+- **AND** the control SHALL enter a temporary confirmation state.
+
+#### Scenario: Confirm delete
+
+- **GIVEN** a block's Delete control is in its temporary confirmation state
+- **WHEN** the user activates that control again before the confirmation expires
+- **THEN** that block SHALL be removed
+- **AND** other blocks SHALL remain unchanged.
+
+#### Scenario: Delete confirmation expires
+
+- **GIVEN** a block's Delete control is armed for confirmation
+- **WHEN** the confirmation window expires without a second activation
+- **THEN** the block SHALL remain unchanged
+- **AND** the Delete control SHALL return to its normal state.
+
+#### Scenario: Empty block also requires confirmation
+
+- **GIVEN** an empty Cornell block exists
+- **WHEN** the user activates Delete once
+- **THEN** the block SHALL NOT be removed immediately
+- **AND** the same confirmation friction SHALL apply as for populated blocks.
+
+### Requirement: Markdown formatting toolbar
+
+Markdown Notes MUST provide formatting controls for Markdown-capable note fields without replacing Markdown as the stored representation.
+
+#### Scenario: Toolbar in Libre
+
+- GIVEN Libre mode is active
+- WHEN the editor is shown
+- THEN the Markdown formatting toolbar SHALL be visible
+- AND toolbar operations SHALL target the Libre Markdown textarea.
+
+#### Scenario: Toolbar in Cornell
+
+- GIVEN Cornell mode is active
+- WHEN a Notes or Summary field is active
+- THEN toolbar operations SHALL transform that Markdown field
+- AND the resulting Cornell content SHALL synchronize to the canonical body.
+
+#### Scenario: Cue field is excluded
+
+- GIVEN a Cornell Cue / Question field is active
+- WHEN the user activates a Markdown toolbar command
+- THEN Markdown Notes SHALL NOT insert Markdown formatting into the Cue field.
+
+#### Scenario: Toolbar in Repaso
+
+- GIVEN Repaso mode is active
+- WHEN the view renders
+- THEN the Markdown formatting toolbar SHALL be hidden.
+
+### Requirement: Inline formatting operations
+
+Markdown Notes MUST support non-destructive inline Markdown insertion.
+
+#### Scenario: Bold selected text
+
+- GIVEN text is selected in a supported Markdown textarea
+- WHEN Bold is activated
+- THEN the selected text SHALL be wrapped in `**`.
+
+#### Scenario: Bold without selection
+
+- GIVEN a supported Markdown textarea has a caret but no selection
+- WHEN Bold is activated
+- THEN Markdown Notes SHALL insert a bold placeholder
+- AND SHALL leave a useful selection or caret for immediate typing.
+
+#### Scenario: Link selected text
+
+- GIVEN text is selected
+- WHEN Link is activated
+- THEN the result SHALL use Markdown link syntax
+- AND the URL placeholder SHALL remain editable.
+
+### Requirement: Line-based formatting operations
+
+Markdown Notes MUST support headings, lists, task lists, and blockquotes across the current line or selected lines.
+
+#### Scenario: Multiple selected lines become bullets
+
+- GIVEN multiple lines are selected
+- WHEN Unordered List is activated
+- THEN each selected line SHALL receive a Markdown bullet prefix.
+
+#### Scenario: Multiple selected lines become ordered items
+
+- GIVEN multiple lines are selected
+- WHEN Ordered List is activated
+- THEN each selected line SHALL receive an incrementing Markdown ordered-list prefix beginning at 1.
+
+#### Scenario: Current line becomes heading
+
+- GIVEN no text range is selected
+- AND the caret is within a line
+- WHEN H2 is activated
+- THEN that complete line SHALL receive an H2 prefix.
+
+### Requirement: Code formatting operations
+
+Markdown Notes MUST support inline and fenced code insertion.
+
+#### Scenario: Inline code selection
+
+- GIVEN a single-line selection exists
+- WHEN Inline Code is activated
+- THEN the selection SHALL be wrapped in backticks.
+
+#### Scenario: Fenced code selection
+
+- GIVEN text is selected
+- WHEN Code Block is activated
+- THEN the selected text SHALL be wrapped in a fenced Markdown code block.
+
+### Requirement: Formatting preserves editor state flow
+
+Toolbar operations MUST behave like ordinary edits for persistence and dirty-state purposes.
+
+#### Scenario: Formatting Libre marks canonical body changed
+
+- GIVEN Libre mode is active
+- WHEN a toolbar operation changes text
+- THEN activeState.body SHALL reflect the transformed text
+- AND normal draft persistence SHALL run.
+
+#### Scenario: Formatting Cornell updates canonical body
+
+- GIVEN a Cornell Notes or Summary field is active
+- WHEN a toolbar operation changes text
+- THEN the Cornell structured state SHALL reflect the transformed text
+- AND the canonical Markdown body SHALL reflect the same change.
+
+### Requirement: Markdown editing shortcuts
+
+Markdown Notes SHALL provide common formatting shortcuts without conflicting with save behavior.
+
+#### Scenario: Bold shortcut
+
+- GIVEN a supported Markdown textarea has focus
+- WHEN the user presses Cmd/Ctrl+B
+- THEN Bold SHALL be applied.
+
+#### Scenario: Italic shortcut
+
+- GIVEN a supported Markdown textarea has focus
+- WHEN the user presses Cmd/Ctrl+I
+- THEN Italic SHALL be applied.
+
+#### Scenario: Link shortcut
+
+- GIVEN a supported Markdown textarea has focus
+- WHEN the user presses Cmd/Ctrl+K
+- THEN Link SHALL be applied.
+
+#### Scenario: Save shortcut remains available
+
+- GIVEN an editable notes field is focused
+- WHEN the user presses Cmd/Ctrl+S
+- THEN the existing save behavior SHALL remain unchanged.
+
+### Requirement: Monotonic userscript release version
+
+Published Markdown Notes userscript metadata MUST use a version greater than previously published versions, including after reverting a feature.
+
+#### Scenario: Revert after v1.8.0
+
+- **GIVEN** v1.8.0 has already been installed
+- **WHEN** the Live Preview feature is reverted
+- **THEN** the reverted userscript SHALL advertise a version greater than v1.8.0
+- **AND** SHALL NOT advertise v1.7.0.
+
+### Requirement: Explicit update source
+
+Markdown Notes MUST declare the canonical raw userscript URL for update and download metadata.
+
+#### Scenario: Updated userscript metadata
+
+- **WHEN** v1.8.1 is installed
+- **THEN** `@updateURL` SHALL point to the raw `master` userscript
+- **AND** `@downloadURL` SHALL point to the same canonical userscript.
+
+### Requirement: Live Preview remains reverted
+
+The version correction MUST NOT restore Live Preview behavior.
+
+#### Scenario: v1.8.1 source
+
+- **WHEN** the corrected release is inspected
+- **THEN** Live Preview UI and runtime symbols SHALL remain absent
+- **AND** the existing Libre Markdown editor and Cornell UX SHALL remain unchanged.
+
+### Requirement: Select the panel's expanded layout
+Markdown Notes SHALL allow selecting **Lateral**, **Abajo**, or **Flotante**
+while the notes panel is open, without replacing the current draft.
+
+#### Scenario: Switch from side to bottom
+- **GIVEN** the notes panel is open with an unsaved Markdown draft
+- **WHEN** the user selects Abajo
+- **THEN** the panel SHALL occupy the bottom of the viewport
+- **AND** the draft and selection of note SHALL remain intact.
+
+#### Scenario: Switch to floating
+- **WHEN** the user selects Flotante
+- **THEN** the panel SHALL become a movable window with its own geometry.
+
+#### Scenario: Existing installation
+- **GIVEN** the user has never selected a layout
+- **WHEN** Markdown Notes starts
+- **THEN** it SHALL default to the existing Lateral layout.
+
+### Requirement: Resizable bottom dock
+The expanded bottom layout SHALL occupy a bounded portion of the viewport,
+and its top edge SHALL allow users to resize the height.
+
+#### Scenario: Resize bottom dock
+- **WHEN** the user drags the top resize handle
+- **THEN** the panel's height SHALL change within available viewport limits
+- **AND** the new height SHALL be remembered.
+
+### Requirement: Movable and resizable floating panel
+The expanded floating layout SHALL support pointer dragging via a dedicated
+handle and bounded resizing, without stealing editor text gestures.
+
+#### Scenario: Drag floating window
+- **WHEN** the user drags the floating-window handle
+- **THEN** the panel SHALL move within viewport margins
+- **AND** the position SHALL persist.
+
+#### Scenario: Resize floating window
+- **WHEN** the user drags the bottom-right resize handle
+- **THEN** the width and height SHALL be adjusted while remaining usable.
+
+#### Scenario: Prevent drag from editor interactions
+- **WHEN** the user selects text or interacts with an input/button
+- **THEN** the window SHALL NOT move.
+
+### Requirement: Restore safe geometry
+Layout, size and floating position SHALL persist across page reload and
+navigation, and SHALL be clamped when the viewport changes.
+
+#### Scenario: Reopen panel
+- **GIVEN** the panel was closed in floating layout
+- **WHEN** the user reopens it
+- **THEN** its last layout and bounded geometry SHALL be restored.
+
+#### Scenario: Viewport becomes smaller
+- **WHEN** the viewport shrinks
+- **THEN** the panel SHALL remain reachable and within the screen
+- **AND** existing note content SHALL not be changed.
+
+### Requirement: Preserve app content and hosting platform behavior
+Position changes SHALL not affect drafts, files, Cornell mode or library
+and SHALL avoid permanently obscuring important host content.
+
+#### Scenario: ChatGPT bottom dock
+- **WHEN** Abajo is active on a supported desktop ChatGPT viewport
+- **THEN** the known workspace SHALL reserve bottom space for the panel.
+
+#### Scenario: Udemy floating panel
+- **WHEN** Flotante is selected during a Udemy lecture
+- **THEN** the window SHALL be movable away from relevant player controls
+- **AND** it SHALL NOT manipulate video playback.
