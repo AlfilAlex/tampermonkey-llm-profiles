@@ -22,6 +22,14 @@ Cada userscript es un proyecto independiente y mantiene su propio OpenSpec:
 
 No existe un OpenSpec compartido en la raíz: compartir repositorio no implica compartir capabilities, almacenamiento ni runtime.
 
+## En diseño: Udemy Markdown Notes
+
+Proyecto independiente para tomar notas **por video de Udemy**, sin marcas de tiempo de reproducción.
+
+El alcance y los requisitos están en
+[`udemy-notes/openspec/changes/add-video-notes/`](udemy-notes/openspec/changes/add-video-notes/).
+El userscript de Udemy **todavía no está implementado**.
+
 ## Userscripts
 
 ### ChatGPT Prompt Profiles v1.3.0
