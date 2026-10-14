@@ -2769,7 +2769,7 @@
 
   function clampBottomPanelHeight(height, viewportHeight = window.innerHeight) {
     const maximum = Math.max(180, viewportHeight - 100);
-    const minimum = Math.min(230, maximum);
+    const minimum = Math.min(380, maximum);
     return boundedPanelNumber(height, DEFAULT_BOTTOM_HEIGHT, minimum, maximum);
   }
 
@@ -2780,7 +2780,7 @@
       rect?.width, DEFAULT_FLOAT_WIDTH, Math.min(320, roomWidth), roomWidth
     );
     const height = boundedPanelNumber(
-      rect?.height, DEFAULT_FLOAT_HEIGHT, Math.min(280, roomHeight), roomHeight
+      rect?.height, DEFAULT_FLOAT_HEIGHT, Math.min(380, roomHeight), roomHeight
     );
     const defaultLeft = Math.max(PANEL_MARGIN, vw - width - 40);
     const defaultTop = Math.min(96, Math.max(PANEL_MARGIN, vh - height - PANEL_MARGIN));
