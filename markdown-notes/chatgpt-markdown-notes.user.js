@@ -2786,16 +2786,16 @@
     if (!panel || !activeState) return;
 
     if (activeState.noteMode === 'freeform') {
-      panel.querySelector('.tmn-editor')?.focus();
+      panel.querySelector('.tmn-editor')?.focus({ preventScroll: true });
       return;
     }
 
     if (activeState.noteMode === 'cornell') {
-      panel.querySelector('.tmn-cue-editor, .tmn-add-block')?.focus();
+      panel.querySelector('.tmn-cue-editor, .tmn-add-block')?.focus({ preventScroll: true });
       return;
     }
 
-    panel.querySelector('.tmn-review-reveal')?.focus();
+    panel.querySelector('.tmn-review-reveal')?.focus({ preventScroll: true });
   }
 
   function restorePanelState() {
@@ -2873,7 +2873,10 @@
     const selected = selectedLibraryFile;
     panel.querySelector('.tmn-library-filename').textContent = selected.name;
     const originLink = panel.querySelector('.tmn-library-origin');
-    const origin = validChatUrl(selected.originChatUrl);
+    const origin = IS_UDEMY
+      ? validUdemyLectureUrl(selected.originUdemyUrl) || validChatUrl(selected.originChatUrl)
+      : validChatUrl(selected.originChatUrl) || validUdemyLectureUrl(selected.originUdemyUrl);
+    originLink.textContent = origin && origin.includes('udemy.com') ? 'Ver video de origen' : 'Ver chat de origen';
     originLink.hidden = !origin;
     if (origin) originLink.href = origin;
     else originLink.removeAttribute('href');
@@ -2895,23 +2898,28 @@
     const initialDirectoryId = directoryId;
     const available = [];
     const matched = [];
-    const currentUrl = validChatUrl(getChatUrl());
+    const currentUrl = currentSourceUrl();
     for await (const handle of directoryHandle.values()) {
       if (handle.kind !== 'file' || !/\.md$/i.test(handle.name)) continue;
       let originChatUrl = null;
+      let originUdemyUrl = null;
       let linkedChatUrls = [];
+      let linkedUdemyUrls = [];
       try {
         const file = await handle.getFile();
         if (file.size <= 5 * 1024 * 1024) {
           const meta = parseMarkdownMetadata(await file.text());
           originChatUrl = meta.originChatUrl;
+          originUdemyUrl = meta.originUdemyUrl;
           linkedChatUrls = meta.linkedChatUrls;
+          linkedUdemyUrls = meta.linkedUdemyUrls;
         }
       } catch (error) {
         console.warn('[Markdown Notes] No se pudo leer el archivo:', handle.name, error);
       }
-      available.push({ name: handle.name, originChatUrl, linkedChatUrls });
-      if (currentUrl && linkedChatUrls.includes(currentUrl)) matched.push(handle.name);
+      available.push({ name: handle.name, originChatUrl, originUdemyUrl, linkedChatUrls, linkedUdemyUrls });
+      if (currentUrl && (IS_UDEMY ? linkedUdemyUrls : linkedChatUrls).includes(currentUrl))
+        matched.push(handle.name);
     }
     if (initialChatKey !== activeChatKey || initialDirectoryId !== directoryId) return;
 
@@ -3035,7 +3043,8 @@
     selectedLibraryFile = {
       name: filename,
       content,
-      originChatUrl: meta.originChatUrl
+      originChatUrl: meta.originChatUrl,
+      originUdemyUrl: meta.originUdemyUrl
     };
     renderLibrary();
     setLibraryStatus('Vista de solo lectura. No modifica tu borrador.');
@@ -3045,9 +3054,11 @@
     if (!selectedLibraryFile || !directoryHandle) return;
     const chatKey = activeChatKey;
     const dirId = directoryId;
-    const chatUrl = validChatUrl(getChatUrl());
-    if (!chatKey?.startsWith('chat:') || !chatUrl)
-      throw new Error('Primero abre un chat guardado con una URL /c/ válida.');
+    const sourceUrl = currentSourceUrl();
+    if (!canLinkCurrentSource() || !sourceUrl)
+      throw new Error(IS_UDEMY
+        ? 'Abre un video Udemy válido antes de vincular notas.'
+        : 'Primero abre un chat guardado con una URL /c/ válida.');
     const allowed = await ensureWritePermission(directoryHandle);
     if (!allowed) throw new Error('Se necesita permiso de escritura para actualizar los vínculos.');
 
@@ -3070,7 +3081,9 @@
     if (chatKey !== activeChatKey || dirId !== directoryId)
       throw new Error('Cambió la conversación o carpeta. Repite la acción en el chat actual.');
 
-    const updated = withLinkedChatUrl(original, chatUrl, add);
+    const updated = IS_UDEMY
+      ? withLinkedUdemyUrl(original, sourceUrl, add)
+      : withLinkedChatUrl(original, sourceUrl, add);
     await rewriteMetadata(name, original, updated);
     const next = add
       ? [...new Set([...linkedFiles, name])]
@@ -3080,7 +3093,12 @@
     await idbSet(LINKS_STORE, dirId + ':' + chatKey, next);
     if (chatKey !== activeChatKey || dirId !== directoryId) return;
     linkedFiles = next;
-    selectedLibraryFile = { name, content: updated, originChatUrl: parseMarkdownMetadata(updated).originChatUrl };
+    const metadata = parseMarkdownMetadata(updated);
+    selectedLibraryFile = {
+      name, content: updated,
+      originChatUrl: metadata.originChatUrl,
+      originUdemyUrl: metadata.originUdemyUrl
+    };
     renderLibrary();
     setLibraryStatus(add ? 'Documento vinculado al chat actual.' : 'Documento desvinculado; el archivo no fue eliminado.');
   }
@@ -3099,6 +3117,8 @@
     label.textContent = info
       ? 'Udemy · Curso: ' + info.courseSlug + ' · Video: ' + info.lectureId
       : 'Udemy · Abre una clase con URL /course/.../learn/lecture/<id> para editar notas.';
+    const status = panel.querySelector('.tmn-context');
+    if (status && !info) status.setAttribute('role', 'status');
   }
 
   function renderHeader() {
