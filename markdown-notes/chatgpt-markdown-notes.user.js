@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.10.0
-// @description  Panel lateral acoplado y redimensionable para notas Markdown persistentes por conversación.
+// @version      1.11.0
+// @description  Notas Markdown locales por conversación ChatGPT o video de Udemy, con Cornell y biblioteca.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
+// @match        https://www.udemy.com/*
 // @updateURL    https://raw.githubusercontent.com/AlfilAlex/tampermonkey-llm-profiles/master/markdown-notes/chatgpt-markdown-notes.user.js
 // @downloadURL  https://raw.githubusercontent.com/AlfilAlex/tampermonkey-llm-profiles/master/markdown-notes/chatgpt-markdown-notes.user.js
 // @run-at       document-idle
@@ -15,6 +16,7 @@
   'use strict';
 
   const APP = 'tm-chatgpt-markdown-notes';
+  const IS_UDEMY = location.hostname === 'www.udemy.com';
   const DB_NAME = `${APP}-db`;
   const DB_VERSION = 3;
 
@@ -144,6 +146,45 @@
   // Conversación
   // ===========================================================================
 
+
+  // Stable lecture identity from the Udemy player URL. A missing or ambiguous
+  // /learn/lecture/<numeric-id> segment is not an editable lecture context.
+  function getUdemyLectureInfo(url = location.href) {
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname !== 'www.udemy.com' || parsed.protocol !== 'https:') return null;
+      const match = /^\/course\/([^/]+)\/learn\/lecture\/(\d+)\/?$/.exec(parsed.pathname);
+      if (!match) return null;
+      const slug = decodeURIComponent(match[1]);
+      const id = match[2];
+      if (!slug || !/^[a-z0-9-]+$/i.test(slug)) return null;
+      return {
+        courseSlug: slug,
+        lectureId: id,
+        url: parsed.origin + '/course/' + match[1] + '/learn/lecture/' + id,
+        key: 'udemy:course:' + slug + ':lecture:' + id
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function validUdemyLectureUrl(value) {
+    return getUdemyLectureInfo(value)?.url || null;
+  }
+
+  function currentSourceUrl() {
+    return IS_UDEMY
+      ? getUdemyLectureInfo()?.url || null
+      : validChatUrl(getChatUrl());
+  }
+
+  function canLinkCurrentSource() {
+    return IS_UDEMY
+      ? Boolean(getUdemyLectureInfo())
+      : Boolean(getChatId());
+  }
+
   function getChatId() {
     const match = location.pathname.match(/\/c\/([^/?#]+)/);
     return match ? match[1] : null;
@@ -165,6 +206,7 @@
   }
 
   function getCurrentChatKey() {
+    if (IS_UDEMY) return getUdemyLectureInfo()?.key || 'udemy:unavailable';
     const chatId = getChatId();
     return chatId ? `chat:${chatId}` : getOrCreateNewChatSessionKey();
   }
@@ -645,6 +687,7 @@
       savedNoteMode: null,
       originChatId: null,
       originChatUrl: null,
+      originUdemyUrl: null,
       sharedFilename: null,
       sharedDirectoryId: null,
       sharedFileSnapshot: null,
@@ -718,6 +761,7 @@
         : null,
       originChatId: typeof value.originChatId === 'string' ? value.originChatId : null,
       originChatUrl: typeof value.originChatUrl === 'string' ? value.originChatUrl : null,
+      originUdemyUrl: typeof value.originUdemyUrl === 'string' ? value.originUdemyUrl : null,
       sharedFilename: typeof value.sharedFilename === 'string' ? value.sharedFilename : null,
       sharedDirectoryId: typeof value.sharedDirectoryId === 'string' ? value.sharedDirectoryId : null,
       sharedFileSnapshot: typeof value.sharedFileSnapshot === 'string' ? value.sharedFileSnapshot : null,
@@ -1197,10 +1241,25 @@
         if (safe && !linkedChatUrls.includes(safe)) linkedChatUrls.push(safe);
       }
     }
+
+    const linkedUdemyUrls = [];
+    const udemyBlock = /^linked_udemy_lectures:[^\r\n]*\r?\n((?:[ \t]+-[^\r\n]*(?:\r?\n|$))*)/m.exec(header);
+    if (udemyBlock) {
+      for (const line of udemyBlock[1].split(/\r?\n/)) {
+        const row = /^\s*-\s+(.+?)\s*$/.exec(line);
+        if (!row) continue;
+        let value = row[1];
+        try { value = JSON.parse(value); } catch { value = value.replace(/^'|'$/g, ''); }
+        const valid = validUdemyLectureUrl(value);
+        if (valid && !linkedUdemyUrls.includes(valid)) linkedUdemyUrls.push(valid);
+      }
+    }
     return {
       originChatId: scalar('chat_id'),
       originChatUrl: validChatUrl(scalar('chat_url')),
+      originUdemyUrl: validUdemyLectureUrl(scalar('udemy_lecture_url')),
       linkedChatUrls,
+      linkedUdemyUrls,
       headerMatch
     };
   }
@@ -1221,6 +1280,27 @@
       return input.replace(meta.headerMatch[0], () => '---\n' + updated + '\n---');
     }
     return rows ? '---\nlinked_chat_urls:\n' + rows + '\n---\n\n' + input : input;
+  }
+
+
+  function withLinkedUdemyUrl(raw, url, add) {
+    const normalized = validUdemyLectureUrl(url);
+    if (!normalized) throw new Error('Se necesita una URL válida de video Udemy.');
+    const input = String(raw);
+    const meta = parseMarkdownMetadata(input);
+    const links = new Set(meta.linkedUdemyUrls);
+    if (add) links.add(normalized);
+    else links.delete(normalized);
+    const rows = [...links].map(link => '  - ' + yamlString(link)).join('\n');
+    if (meta.headerMatch) {
+      const block = /^linked_udemy_lectures:[^\r\n]*\r?\n(?:[ \t]+-[^\r\n]*(?:\r?\n|$))*/m;
+      const original = meta.headerMatch[1].replace(block, '').replace(/\n+$/, '');
+      const newHeader = original + (rows ? '\nlinked_udemy_lectures:\n' + rows : '');
+      return input.replace(meta.headerMatch[0], () => '---\n' + newHeader + '\n---');
+    }
+    return rows
+      ? '---\nlinked_udemy_lectures:\n' + rows + '\n---\n\n' + input
+      : input;
   }
 
   async function readMarkdownFile(filename) {
@@ -1256,7 +1336,7 @@
     return true;
   }
 
-  function buildMarkdown(linkedChatUrls = []) {
+  function buildMarkdown(linkedChatUrls = [], linkedUdemyUrls = []) {
     const title = currentNoteTitle();
 
     if (!title) {
@@ -1265,6 +1345,8 @@
 
     const chatId = activeState.originChatId || null;
     const chatUrl = activeState.originChatUrl || null;
+    const originUdemyUrl = activeState.originUdemyUrl || null;
+    const video = IS_UDEMY ? getUdemyLectureInfo() : null;
     const body = String(activeState.body || '').trim();
 
     const created = activeState.createdAt || localIsoTimestamp();
@@ -1275,7 +1357,7 @@
       `title: ${yamlString(title)}`,
       `created: ${yamlString(created)}`,
       `updated: ${yamlString(updated)}`,
-      `source: ${yamlString('ChatGPT')}`
+      `source: ${yamlString(IS_UDEMY ? 'Udemy' : 'ChatGPT')}`
     ];
 
     if (isCornellBody(body)) {
@@ -1286,6 +1368,12 @@
       chatId ? `chat_id: ${yamlString(chatId)}` : 'chat_id: null',
       chatUrl ? `chat_url: ${yamlString(chatUrl)}` : 'chat_url: null',
       ...(linkedChatUrls.length ? ['linked_chat_urls:', ...linkedChatUrls.map(url => `  - ${yamlString(url)}`)] : []),
+      ...(originUdemyUrl ? [`udemy_lecture_url: ${yamlString(originUdemyUrl)}`] : []),
+      ...(video ? [
+        `udemy_course_slug: ${yamlString(video.courseSlug)}`,
+        `udemy_lecture_id: ${yamlString(video.lectureId)}`
+      ] : []),
+      ...(linkedUdemyUrls.length ? ['linked_udemy_lectures:', ...linkedUdemyUrls.map(url => `  - ${yamlString(url)}`)] : []),
       '---',
       '',
       `# ${title}`,
@@ -1752,6 +1840,11 @@
       #${APP}-panel.tmn-library-open .tmn-editor-wrap,
       #${APP}-panel.tmn-library-open .tmn-footer {display:none!important;}
 
+      #${APP}-panel .tmn-context {
+        padding: 7px 12px; font-size: 11px; opacity: .85;
+        background: rgba(127,127,127,.12);
+      }
+      #${APP}-panel .tmn-context[hidden] { display: none !important; }
       #${APP}-panel .tmn-header {
         display: flex;
         gap: 10px;
@@ -2247,6 +2340,7 @@
         </div>
       </div>
 
+      <div class="tmn-context" aria-live="polite"></div>
       <div class="tmn-toolbar">
         <div class="tmn-folder">Carpeta: no configurada</div>
         <button class="tmn-folder-button" type="button">Carpeta</button>
@@ -2692,16 +2786,16 @@
     if (!panel || !activeState) return;
 
     if (activeState.noteMode === 'freeform') {
-      panel.querySelector('.tmn-editor')?.focus();
+      panel.querySelector('.tmn-editor')?.focus({ preventScroll: true });
       return;
     }
 
     if (activeState.noteMode === 'cornell') {
-      panel.querySelector('.tmn-cue-editor, .tmn-add-block')?.focus();
+      panel.querySelector('.tmn-cue-editor, .tmn-add-block')?.focus({ preventScroll: true });
       return;
     }
 
-    panel.querySelector('.tmn-review-reveal')?.focus();
+    panel.querySelector('.tmn-review-reveal')?.focus({ preventScroll: true });
   }
 
   function restorePanelState() {
@@ -2779,7 +2873,10 @@
     const selected = selectedLibraryFile;
     panel.querySelector('.tmn-library-filename').textContent = selected.name;
     const originLink = panel.querySelector('.tmn-library-origin');
-    const origin = validChatUrl(selected.originChatUrl);
+    const origin = IS_UDEMY
+      ? validUdemyLectureUrl(selected.originUdemyUrl) || validChatUrl(selected.originChatUrl)
+      : validChatUrl(selected.originChatUrl) || validUdemyLectureUrl(selected.originUdemyUrl);
+    originLink.textContent = origin && origin.includes('udemy.com') ? 'Ver video de origen' : 'Ver chat de origen';
     originLink.hidden = !origin;
     if (origin) originLink.href = origin;
     else originLink.removeAttribute('href');
@@ -2801,23 +2898,28 @@
     const initialDirectoryId = directoryId;
     const available = [];
     const matched = [];
-    const currentUrl = validChatUrl(getChatUrl());
+    const currentUrl = currentSourceUrl();
     for await (const handle of directoryHandle.values()) {
       if (handle.kind !== 'file' || !/\.md$/i.test(handle.name)) continue;
       let originChatUrl = null;
+      let originUdemyUrl = null;
       let linkedChatUrls = [];
+      let linkedUdemyUrls = [];
       try {
         const file = await handle.getFile();
         if (file.size <= 5 * 1024 * 1024) {
           const meta = parseMarkdownMetadata(await file.text());
           originChatUrl = meta.originChatUrl;
+          originUdemyUrl = meta.originUdemyUrl;
           linkedChatUrls = meta.linkedChatUrls;
+          linkedUdemyUrls = meta.linkedUdemyUrls;
         }
       } catch (error) {
         console.warn('[Markdown Notes] No se pudo leer el archivo:', handle.name, error);
       }
-      available.push({ name: handle.name, originChatUrl, linkedChatUrls });
-      if (currentUrl && linkedChatUrls.includes(currentUrl)) matched.push(handle.name);
+      available.push({ name: handle.name, originChatUrl, originUdemyUrl, linkedChatUrls, linkedUdemyUrls });
+      if (currentUrl && (IS_UDEMY ? linkedUdemyUrls : linkedChatUrls).includes(currentUrl))
+        matched.push(handle.name);
     }
     if (initialChatKey !== activeChatKey || initialDirectoryId !== directoryId) return;
 
@@ -2873,6 +2975,10 @@
 
   function createNewActiveNote() {
     if (!activeState) return;
+    if (IS_UDEMY && !getUdemyLectureInfo()) {
+      setStatus('Abre un video de Udemy antes de crear su nota.', 'error');
+      return;
+    }
     if (hasUnsavedDraftToReplace() &&
         !window.confirm('Hay cambios sin guardar. ¿Descartar el borrador y crear una nueva nota?')) return;
     clearTimeout(draftSaveTimer);
@@ -2885,6 +2991,8 @@
   }
 
   async function adoptSelectedDocument() {
+    if (IS_UDEMY && !getUdemyLectureInfo())
+      throw new Error('Abre un video de Udemy antes de elegir una nota activa.');
     if (!selectedLibraryFile || !activeState || !directoryHandle || !directoryId) return;
     const previousKey = activeChatKey;
     const currentDir = directoryId;
@@ -2893,7 +3001,7 @@
         !window.confirm('La nota actual tiene cambios sin guardar. ¿Sustituirla por este archivo?')) return;
     let raw = await readMarkdownFile(filename);
     if (previousKey !== activeChatKey || currentDir !== directoryId) return;
-    if (previousKey.startsWith('chat:') && !linkedFiles.includes(filename)) {
+    if (canLinkCurrentSource() && !linkedFiles.includes(filename)) {
       await changeLibraryLink(true);
       if (previousKey !== activeChatKey || currentDir !== directoryId) return;
       raw = await readMarkdownFile(filename);
@@ -2912,6 +3020,7 @@
       savedBody: body,
       originChatId: metadata.originChatId,
       originChatUrl: metadata.originChatUrl,
+      originUdemyUrl: metadata.originUdemyUrl,
       noteMode: mode,
       savedNoteMode: mode,
       lastSavedAt: localIsoTimestamp()
@@ -2934,7 +3043,8 @@
     selectedLibraryFile = {
       name: filename,
       content,
-      originChatUrl: meta.originChatUrl
+      originChatUrl: meta.originChatUrl,
+      originUdemyUrl: meta.originUdemyUrl
     };
     renderLibrary();
     setLibraryStatus('Vista de solo lectura. No modifica tu borrador.');
@@ -2944,9 +3054,11 @@
     if (!selectedLibraryFile || !directoryHandle) return;
     const chatKey = activeChatKey;
     const dirId = directoryId;
-    const chatUrl = validChatUrl(getChatUrl());
-    if (!chatKey?.startsWith('chat:') || !chatUrl)
-      throw new Error('Primero abre un chat guardado con una URL /c/ válida.');
+    const sourceUrl = currentSourceUrl();
+    if (!canLinkCurrentSource() || !sourceUrl)
+      throw new Error(IS_UDEMY
+        ? 'Abre un video Udemy válido antes de vincular notas.'
+        : 'Primero abre un chat guardado con una URL /c/ válida.');
     const allowed = await ensureWritePermission(directoryHandle);
     if (!allowed) throw new Error('Se necesita permiso de escritura para actualizar los vínculos.');
 
@@ -2969,7 +3081,9 @@
     if (chatKey !== activeChatKey || dirId !== directoryId)
       throw new Error('Cambió la conversación o carpeta. Repite la acción en el chat actual.');
 
-    const updated = withLinkedChatUrl(original, chatUrl, add);
+    const updated = IS_UDEMY
+      ? withLinkedUdemyUrl(original, sourceUrl, add)
+      : withLinkedChatUrl(original, sourceUrl, add);
     await rewriteMetadata(name, original, updated);
     const next = add
       ? [...new Set([...linkedFiles, name])]
@@ -2979,9 +3093,32 @@
     await idbSet(LINKS_STORE, dirId + ':' + chatKey, next);
     if (chatKey !== activeChatKey || dirId !== directoryId) return;
     linkedFiles = next;
-    selectedLibraryFile = { name, content: updated, originChatUrl: parseMarkdownMetadata(updated).originChatUrl };
+    const metadata = parseMarkdownMetadata(updated);
+    selectedLibraryFile = {
+      name, content: updated,
+      originChatUrl: metadata.originChatUrl,
+      originUdemyUrl: metadata.originUdemyUrl
+    };
     renderLibrary();
     setLibraryStatus(add ? 'Documento vinculado al chat actual.' : 'Documento desvinculado; el archivo no fue eliminado.');
+  }
+
+
+  function renderContext() {
+    if (!panel) return;
+    const label = panel.querySelector('.tmn-context');
+    if (!label) return;
+    if (!IS_UDEMY) {
+      label.hidden = true;
+      return;
+    }
+    label.hidden = false;
+    const info = getUdemyLectureInfo();
+    label.textContent = info
+      ? 'Udemy · Curso: ' + info.courseSlug + ' · Video: ' + info.lectureId
+      : 'Udemy · Abre una clase con URL /course/.../learn/lecture/<id> para editar notas.';
+    const status = panel.querySelector('.tmn-context');
+    if (status && !info) status.setAttribute('role', 'status');
   }
 
   function renderHeader() {
@@ -3249,6 +3386,7 @@
 
   function renderAll() {
     renderHeader();
+    renderContext();
     renderModeSelector();
     renderEditor();
     renderFolder();
@@ -3263,6 +3401,10 @@
 
   async function saveFile() {
     if (saving || !activeState) return;
+    if (IS_UDEMY && !getUdemyLectureInfo()) {
+      setStatus('No se pudo identificar el video de Udemy. Abre una clase válida antes de guardar.', 'error');
+      return;
+    }
 
     const targetFilename = currentFilename();
 
@@ -3313,15 +3455,17 @@
         assertSharedFileRevision(current, state.sharedFileSnapshot);
 
         let nextContent = updateSavedMarkdownBody(current, state.body);
-        const chatUrl = validChatUrl(getChatUrl());
-        if (scopeKey.startsWith('chat:') && chatUrl)
-          nextContent = withLinkedChatUrl(nextContent, chatUrl, true);
+        const sourceUrl = currentSourceUrl();
+        if (scopeKey.startsWith('chat:') && sourceUrl)
+          nextContent = withLinkedChatUrl(nextContent, sourceUrl, true);
+        else if (IS_UDEMY && sourceUrl)
+          nextContent = withLinkedUdemyUrl(nextContent, sourceUrl, true);
         await rewriteMetadata(targetFilename, current, nextContent);
         state.sharedFileSnapshot = nextContent;
         state.savedBody = state.body;
         state.lastSavedAt = localIsoTimestamp();
         await persistActiveState();
-        if (scopeKey.startsWith('chat:') && !linkedFiles.includes(targetFilename)) {
+        if (canLinkCurrentSource() && !linkedFiles.includes(targetFilename)) {
           linkedFiles = [...linkedFiles, targetFilename];
           try { await persistChatLinks(linkedFiles, scopeKey); }
           catch (error) { console.warn('[Markdown Notes] Índice de vínculos:', error); }
@@ -3339,6 +3483,9 @@
         throw new Error('Ya existe un documento con ese nombre. Elige otro nombre o ábrelo desde Elegir existente.');
       }
       const previous = parseMarkdownMetadata(existingText);
+      if (IS_UDEMY && !activeState.originUdemyUrl) {
+        activeState.originUdemyUrl = previous.originUdemyUrl || getUdemyLectureInfo()?.url || null;
+      }
       // The provenance already recorded on disk is authoritative. Never
       // replace it with the active conversation just because the file is edited.
       if (previous.originChatId) activeState.originChatId = previous.originChatId;
@@ -3352,7 +3499,7 @@
       await writeMarkdownFile(
         directoryHandle,
         targetFilename,
-        buildMarkdown(previous.linkedChatUrls)
+        buildMarkdown(previous.linkedChatUrls, previous.linkedUdemyUrls)
       );
 
       // Sólo después de una escritura exitosa registramos el nombre del archivo
@@ -3419,7 +3566,7 @@
     linkedFiles = await loadChatLinks(chatKey);
     if (activeState.sharedFilename &&
         activeState.sharedDirectoryId === directoryId &&
-        chatKey.startsWith('chat:') &&
+        (chatKey.startsWith('chat:') || chatKey.startsWith('udemy:course:')) &&
         !linkedFiles.includes(activeState.sharedFilename)) {
       linkedFiles = [...linkedFiles, activeState.sharedFilename];
       await persistChatLinks(linkedFiles, chatKey);
@@ -3530,7 +3677,7 @@
 
       setPanelWidth(currentWidth, false);
     });
-    console.info('[ChatGPT Markdown Notes] v1.10.0 cargado');
+    console.info('[Markdown Notes] v1.11.0 cargado', IS_UDEMY ? '(Udemy)' : '(ChatGPT)');
   }
 
   bootstrap().catch(error => {
