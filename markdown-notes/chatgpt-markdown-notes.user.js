@@ -1241,10 +1241,25 @@
         if (safe && !linkedChatUrls.includes(safe)) linkedChatUrls.push(safe);
       }
     }
+
+    const linkedUdemyUrls = [];
+    const udemyBlock = /^linked_udemy_lectures:[^\r\n]*\r?\n((?:[ \t]+-[^\r\n]*(?:\r?\n|$))*)/m.exec(header);
+    if (udemyBlock) {
+      for (const line of udemyBlock[1].split(/\r?\n/)) {
+        const row = /^\s*-\s+(.+?)\s*$/.exec(line);
+        if (!row) continue;
+        let value = row[1];
+        try { value = JSON.parse(value); } catch { value = value.replace(/^'|'$/g, ''); }
+        const valid = validUdemyLectureUrl(value);
+        if (valid && !linkedUdemyUrls.includes(valid)) linkedUdemyUrls.push(valid);
+      }
+    }
     return {
       originChatId: scalar('chat_id'),
       originChatUrl: validChatUrl(scalar('chat_url')),
+      originUdemyUrl: validUdemyLectureUrl(scalar('udemy_lecture_url')),
       linkedChatUrls,
+      linkedUdemyUrls,
       headerMatch
     };
   }
@@ -1265,6 +1280,27 @@
       return input.replace(meta.headerMatch[0], () => '---\n' + updated + '\n---');
     }
     return rows ? '---\nlinked_chat_urls:\n' + rows + '\n---\n\n' + input : input;
+  }
+
+
+  function withLinkedUdemyUrl(raw, url, add) {
+    const normalized = validUdemyLectureUrl(url);
+    if (!normalized) throw new Error('Se necesita una URL válida de video Udemy.');
+    const input = String(raw);
+    const meta = parseMarkdownMetadata(input);
+    const links = new Set(meta.linkedUdemyUrls);
+    if (add) links.add(normalized);
+    else links.delete(normalized);
+    const rows = [...links].map(link => '  - ' + yamlString(link)).join('\n');
+    if (meta.headerMatch) {
+      const block = /^linked_udemy_lectures:[^\r\n]*\r?\n(?:[ \t]+-[^\r\n]*(?:\r?\n|$))*/m;
+      const original = meta.headerMatch[1].replace(block, '').replace(/\n+$/, '');
+      const newHeader = original + (rows ? '\nlinked_udemy_lectures:\n' + rows : '');
+      return input.replace(meta.headerMatch[0], () => '---\n' + newHeader + '\n---');
+    }
+    return rows
+      ? '---\nlinked_udemy_lectures:\n' + rows + '\n---\n\n' + input
+      : input;
   }
 
   async function readMarkdownFile(filename) {
@@ -1300,7 +1336,7 @@
     return true;
   }
 
-  function buildMarkdown(linkedChatUrls = []) {
+  function buildMarkdown(linkedChatUrls = [], linkedUdemyUrls = []) {
     const title = currentNoteTitle();
 
     if (!title) {
@@ -1309,6 +1345,8 @@
 
     const chatId = activeState.originChatId || null;
     const chatUrl = activeState.originChatUrl || null;
+    const originUdemyUrl = activeState.originUdemyUrl || null;
+    const video = IS_UDEMY ? getUdemyLectureInfo() : null;
     const body = String(activeState.body || '').trim();
 
     const created = activeState.createdAt || localIsoTimestamp();
@@ -1319,7 +1357,7 @@
       `title: ${yamlString(title)}`,
       `created: ${yamlString(created)}`,
       `updated: ${yamlString(updated)}`,
-      `source: ${yamlString('ChatGPT')}`
+      `source: ${yamlString(IS_UDEMY ? 'Udemy' : 'ChatGPT')}`
     ];
 
     if (isCornellBody(body)) {
@@ -1330,6 +1368,12 @@
       chatId ? `chat_id: ${yamlString(chatId)}` : 'chat_id: null',
       chatUrl ? `chat_url: ${yamlString(chatUrl)}` : 'chat_url: null',
       ...(linkedChatUrls.length ? ['linked_chat_urls:', ...linkedChatUrls.map(url => `  - ${yamlString(url)}`)] : []),
+      ...(originUdemyUrl ? [`udemy_lecture_url: ${yamlString(originUdemyUrl)}`] : []),
+      ...(video ? [
+        `udemy_course_slug: ${yamlString(video.courseSlug)}`,
+        `udemy_lecture_id: ${yamlString(video.lectureId)}`
+      ] : []),
+      ...(linkedUdemyUrls.length ? ['linked_udemy_lectures:', ...linkedUdemyUrls.map(url => `  - ${yamlString(url)}`)] : []),
       '---',
       '',
       `# ${title}`,
@@ -3391,15 +3435,17 @@
         assertSharedFileRevision(current, state.sharedFileSnapshot);
 
         let nextContent = updateSavedMarkdownBody(current, state.body);
-        const chatUrl = validChatUrl(getChatUrl());
-        if (scopeKey.startsWith('chat:') && chatUrl)
-          nextContent = withLinkedChatUrl(nextContent, chatUrl, true);
+        const sourceUrl = currentSourceUrl();
+        if (scopeKey.startsWith('chat:') && sourceUrl)
+          nextContent = withLinkedChatUrl(nextContent, sourceUrl, true);
+        else if (IS_UDEMY && sourceUrl)
+          nextContent = withLinkedUdemyUrl(nextContent, sourceUrl, true);
         await rewriteMetadata(targetFilename, current, nextContent);
         state.sharedFileSnapshot = nextContent;
         state.savedBody = state.body;
         state.lastSavedAt = localIsoTimestamp();
         await persistActiveState();
-        if (scopeKey.startsWith('chat:') && !linkedFiles.includes(targetFilename)) {
+        if (canLinkCurrentSource() && !linkedFiles.includes(targetFilename)) {
           linkedFiles = [...linkedFiles, targetFilename];
           try { await persistChatLinks(linkedFiles, scopeKey); }
           catch (error) { console.warn('[Markdown Notes] Índice de vínculos:', error); }
@@ -3417,6 +3463,9 @@
         throw new Error('Ya existe un documento con ese nombre. Elige otro nombre o ábrelo desde Elegir existente.');
       }
       const previous = parseMarkdownMetadata(existingText);
+      if (IS_UDEMY && !activeState.originUdemyUrl) {
+        activeState.originUdemyUrl = previous.originUdemyUrl || getUdemyLectureInfo()?.url || null;
+      }
       // The provenance already recorded on disk is authoritative. Never
       // replace it with the active conversation just because the file is edited.
       if (previous.originChatId) activeState.originChatId = previous.originChatId;
@@ -3430,7 +3479,7 @@
       await writeMarkdownFile(
         directoryHandle,
         targetFilename,
-        buildMarkdown(previous.linkedChatUrls)
+        buildMarkdown(previous.linkedChatUrls, previous.linkedUdemyUrls)
       );
 
       // Sólo después de una escritura exitosa registramos el nombre del archivo
