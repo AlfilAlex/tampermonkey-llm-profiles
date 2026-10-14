@@ -1734,6 +1734,11 @@
       :root {
         --tmn-notes-width: ${DEFAULT_PANEL_WIDTH}px;
         --tmn-notes-gap: 8px;
+        --tmn-bottom-height: ${DEFAULT_BOTTOM_HEIGHT}px;
+        --tmn-float-left: 64px;
+        --tmn-float-top: 64px;
+        --tmn-float-width: ${DEFAULT_FLOAT_WIDTH}px;
+        --tmn-float-height: ${DEFAULT_FLOAT_HEIGHT}px;
       }
 
       #${APP}-launcher {
@@ -1748,7 +1753,7 @@
        * Así reduce el área útil del chat en vez de taparlo.
        */
       @media (min-width: 901px) {
-        html.${APP}-open [data-app-shell-workspace-row="true"] {
+        html.${APP}-open[data-tmn-notes-layout="side"] [data-app-shell-workspace-row="true"] {
           box-sizing: border-box !important;
           padding-right: calc(var(--tmn-notes-width) + var(--tmn-notes-gap)) !important;
           transition: padding-right 120ms ease-out;
@@ -2284,6 +2289,58 @@
       #${APP}-panel .tmn-save:disabled {
         opacity: .5;
         cursor: default;
+      }
+
+
+      @media (min-width: 901px) {
+        html.${APP}-open[data-tmn-notes-layout="bottom"] [data-app-shell-workspace-row="true"] {
+          box-sizing: border-box !important;
+          padding-bottom: calc(var(--tmn-bottom-height) + 8px) !important;
+          transition: padding-bottom 120ms ease-out;
+        }
+        html[data-tmn-notes-layout="bottom"] #${APP}-panel {
+          left: 8px; top: auto; right: 8px; bottom: 8px; width: auto;
+          height: min(var(--tmn-bottom-height), calc(100dvh - 16px));
+        }
+        html[data-tmn-notes-layout="bottom"] #${APP}-panel .tmn-resizer {
+          left: 12px; right: 12px; top: -6px; bottom: auto;
+          width: auto; height: 12px; cursor: ns-resize;
+        }
+        html[data-tmn-notes-layout="bottom"] #${APP}-panel .tmn-resizer::after {
+          left: 8px; right: 8px; top: 5px; bottom: auto; width: auto; height: 2px;
+        }
+        html[data-tmn-notes-layout="floating"] #${APP}-panel {
+          left: var(--tmn-float-left); top: var(--tmn-float-top);
+          right: auto; bottom: auto;
+          width: var(--tmn-float-width); height: var(--tmn-float-height);
+          max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px);
+        }
+        html[data-tmn-notes-layout="floating"] #${APP}-panel .tmn-resizer {
+          left: auto; top: auto; right: -4px; bottom: -4px;
+          width: 20px; height: 20px; cursor: nwse-resize;
+        }
+        html[data-tmn-notes-layout="floating"] #${APP}-panel .tmn-resizer::after {
+          left: 6px; top: auto; bottom: 6px; right: 5px; width: 9px; height: 9px;
+          background: transparent; border-right: 2px solid rgba(210,210,210,.62);
+          border-bottom: 2px solid rgba(210,210,210,.62); border-radius: 0;
+        }
+      }
+      #${APP}-panel .tmn-header-actions {
+        align-items: center; flex-wrap: wrap; justify-content: flex-end;
+      }
+      #${APP}-panel .tmn-layout-label {font-size: 11px;opacity:.8;}
+      #${APP}-panel .tmn-layout-select {
+        min-width: 90px; padding: 5px; border-radius: 7px;
+        border: 1px solid rgba(127,127,127,.4);
+        background: #303135; color: #f5f5f5;
+        font: 12px ui-sans-serif, system-ui, sans-serif;
+      }
+      #${APP}-panel .tmn-header-actions .tmn-float-drag {
+        width: auto; height: 32px; padding: 0 10px;
+        touch-action: none; cursor: move;
+      }
+      #${APP}-panel .tmn-header-actions .tmn-float-drag[hidden] {
+        display: none !important;
       }
 
       @media (max-width: 900px) {
