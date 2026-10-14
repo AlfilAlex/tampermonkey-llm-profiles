@@ -2698,6 +2698,142 @@
   }
 
 
+
+  // Layout geometry is independent of note and filesystem state.
+  function normalizedPanelLayout(value) {
+    return ['side', 'bottom', 'floating'].includes(value) ? value : 'side';
+  }
+
+  function boundedPanelNumber(value, fallback, min, max) {
+    const number = Number(value);
+    const finite = Number.isFinite(number) && number > 0 ? number : fallback;
+    return Math.round(Math.max(min, Math.min(finite, Math.max(min, max))));
+  }
+
+  function clampBottomPanelHeight(height, viewportHeight = window.innerHeight) {
+    const maximum = Math.max(180, viewportHeight - 100);
+    const minimum = Math.min(230, maximum);
+    return boundedPanelNumber(height, DEFAULT_BOTTOM_HEIGHT, minimum, maximum);
+  }
+
+  function clampFloatingPanelRect(rect, vw = window.innerWidth, vh = window.innerHeight) {
+    const roomWidth = Math.max(160, vw - PANEL_MARGIN * 2);
+    const roomHeight = Math.max(160, vh - PANEL_MARGIN * 2);
+    const width = boundedPanelNumber(
+      rect?.width, DEFAULT_FLOAT_WIDTH, Math.min(320, roomWidth), roomWidth
+    );
+    const height = boundedPanelNumber(
+      rect?.height, DEFAULT_FLOAT_HEIGHT, Math.min(280, roomHeight), roomHeight
+    );
+    const defaultLeft = Math.max(PANEL_MARGIN, vw - width - 40);
+    const defaultTop = Math.min(96, Math.max(PANEL_MARGIN, vh - height - PANEL_MARGIN));
+    const left = Math.round(Math.max(
+      PANEL_MARGIN, Math.min(
+        Number.isFinite(Number(rect?.left)) ? Number(rect.left) : defaultLeft,
+        Math.max(PANEL_MARGIN, vw - width - PANEL_MARGIN)
+      )
+    ));
+    const top = Math.round(Math.max(
+      PANEL_MARGIN, Math.min(
+        Number.isFinite(Number(rect?.top)) ? Number(rect.top) : defaultTop,
+        Math.max(PANEL_MARGIN, vh - height - PANEL_MARGIN)
+      )
+    ));
+    return { left, top, width, height };
+  }
+
+  function effectivePanelLayout() {
+    // Keep the desktop preference while showing a reachable compact overlay.
+    return window.innerWidth <= 900 ? 'side' : panelLayout;
+  }
+
+  function setBottomPanelHeight(height, persist = true) {
+    bottomPanelHeight = clampBottomPanelHeight(height);
+    document.documentElement.style.setProperty('--tmn-bottom-height', bottomPanelHeight + 'px');
+    if (persist) localStorage.setItem(BOTTOM_HEIGHT_KEY, String(bottomPanelHeight));
+  }
+
+  function setFloatingPanelRect(rect, persist = true) {
+    floatingRect = clampFloatingPanelRect(rect);
+    const root = document.documentElement.style;
+    root.setProperty('--tmn-float-left', floatingRect.left + 'px');
+    root.setProperty('--tmn-float-top', floatingRect.top + 'px');
+    root.setProperty('--tmn-float-width', floatingRect.width + 'px');
+    root.setProperty('--tmn-float-height', floatingRect.height + 'px');
+    if (persist) localStorage.setItem(FLOAT_RECT_KEY, JSON.stringify(floatingRect));
+  }
+
+  function applyPanelLayout() {
+    document.documentElement.dataset.tmnNotesLayout = effectivePanelLayout();
+    if (panel) {
+      const select = panel.querySelector('.tmn-layout-select');
+      if (select) select.value = panelLayout;
+      const grip = panel.querySelector('.tmn-float-drag');
+      if (grip) grip.hidden = effectivePanelLayout() !== 'floating';
+    }
+    setBottomPanelHeight(bottomPanelHeight, false);
+    setFloatingPanelRect(floatingRect, false);
+  }
+
+  function setPanelLayout(value) {
+    panelLayout = normalizedPanelLayout(value);
+    localStorage.setItem(PANEL_LAYOUT_KEY, panelLayout);
+    applyPanelLayout();
+  }
+
+  function restorePanelLayout() {
+    panelLayout = normalizedPanelLayout(localStorage.getItem(PANEL_LAYOUT_KEY));
+    bottomPanelHeight = localStorage.getItem(BOTTOM_HEIGHT_KEY) || DEFAULT_BOTTOM_HEIGHT;
+    try {
+      floatingRect = JSON.parse(localStorage.getItem(FLOAT_RECT_KEY) || 'null');
+    } catch {
+      floatingRect = null;
+    }
+    applyPanelLayout();
+  }
+
+  function startFloatingDrag(event) {
+    if (effectivePanelLayout() !== 'floating' || event.button !== 0) return;
+    event.preventDefault();
+    const startX = event.clientX, startY = event.clientY;
+    const initial = { ...floatingRect };
+    const onMove = move => {
+      if (move.pointerId !== event.pointerId) return;
+      setFloatingPanelRect({
+        ...initial,
+        left: initial.left + (move.clientX - startX),
+        top: initial.top + (move.clientY - startY)
+      }, false);
+    };
+    const finish = move => {
+      if (move.pointerId !== event.pointerId) return;
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', finish, true);
+      window.removeEventListener('pointercancel', finish, true);
+      setFloatingPanelRect(floatingRect, true);
+    };
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', finish, true);
+    window.addEventListener('pointercancel', finish, true);
+  }
+
+  function moveFloatingWithKeyboard(event) {
+    if (effectivePanelLayout() !== 'floating') return;
+    const delta = event.shiftKey ? 60 : 16;
+    const vectors = {
+      ArrowLeft: [-delta, 0], ArrowRight: [delta, 0],
+      ArrowUp: [0, -delta], ArrowDown: [0, delta]
+    };
+    if (!vectors[event.key]) return;
+    event.preventDefault();
+    const [dx, dy] = vectors[event.key];
+    setFloatingPanelRect({
+      ...floatingRect,
+      left: floatingRect.left + dx,
+      top: floatingRect.top + dy
+    });
+  }
+
   function maxPanelWidthForViewport() {
     // Conserva al menos ~420 px para el chat en escritorio.
     return Math.max(
