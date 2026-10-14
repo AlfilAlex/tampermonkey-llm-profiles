@@ -453,8 +453,6 @@ Libre MUST provide semantic assistance for producing Cornell-compatible Markdown
 - **THEN** Markdown Notes SHALL create a valid empty Cornell document structure
 - **AND** SHALL keep filesystem state unchanged.
 
-## ADDED Requirements
-
 #### Scenario: Legacy draft contains only freeform body
 
 - GIVEN a legacy draft contains freeform body content and no meaningful Cornell content
