@@ -47,7 +47,7 @@ test('defaults to side layout and rejects invalid localStorage values', () => {
 test('bottom height remains within usable viewport', () => {
   assert.equal(api.clampBottomPanelHeight(390, 900), 390);
   assert.equal(api.clampBottomPanelHeight(9000, 900), 800);
-  assert.equal(api.clampBottomPanelHeight(10, 900), 230);
+  assert.equal(api.clampBottomPanelHeight(10, 900), 380);
   assert.equal(api.clampBottomPanelHeight('bad', 900), 390);
 });
 
