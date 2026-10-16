@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.11.0
+// @version      1.12.0
 // @description  Notas Markdown locales por conversación ChatGPT o video de Udemy, con Cornell y biblioteca.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
@@ -28,9 +28,16 @@
 
   const PANEL_OPEN_KEY = `${APP}:panel-open`;
   const PANEL_WIDTH_KEY = `${APP}:panel-width`;
+  const PANEL_LAYOUT_KEY = `${APP}:panel-layout`;
+  const BOTTOM_HEIGHT_KEY = `${APP}:bottom-height`;
+  const FLOAT_RECT_KEY = `${APP}:float-rect`;
   const DEFAULT_PANEL_WIDTH = 430;
   const MIN_PANEL_WIDTH = 300;
   const MAX_PANEL_WIDTH = 760;
+  const DEFAULT_BOTTOM_HEIGHT = 390;
+  const DEFAULT_FLOAT_WIDTH = 520;
+  const DEFAULT_FLOAT_HEIGHT = 580;
+  const PANEL_MARGIN = 8;
   const NEW_CHAT_SESSION_KEY = `${APP}:new-chat-session-key`;
 
   let directoryHandle = null;
@@ -49,6 +56,9 @@
   let draftSaveTimer = null;
   let navigationTimer = null;
   let resizing = false;
+  let panelLayout = 'side';
+  let bottomPanelHeight = DEFAULT_BOTTOM_HEIGHT;
+  let floatingRect = null;
 
   let reviewIndex = 0;
   let reviewRevealed = false;
@@ -1724,6 +1734,11 @@
       :root {
         --tmn-notes-width: ${DEFAULT_PANEL_WIDTH}px;
         --tmn-notes-gap: 8px;
+        --tmn-bottom-height: ${DEFAULT_BOTTOM_HEIGHT}px;
+        --tmn-float-left: 64px;
+        --tmn-float-top: 64px;
+        --tmn-float-width: ${DEFAULT_FLOAT_WIDTH}px;
+        --tmn-float-height: ${DEFAULT_FLOAT_HEIGHT}px;
       }
 
       #${APP}-launcher {
@@ -1738,7 +1753,7 @@
        * Así reduce el área útil del chat en vez de taparlo.
        */
       @media (min-width: 901px) {
-        html.${APP}-open [data-app-shell-workspace-row="true"] {
+        html.${APP}-open[data-tmn-notes-layout="side"] [data-app-shell-workspace-row="true"] {
           box-sizing: border-box !important;
           padding-right: calc(var(--tmn-notes-width) + var(--tmn-notes-gap)) !important;
           transition: padding-right 120ms ease-out;
@@ -2276,6 +2291,58 @@
         cursor: default;
       }
 
+
+      @media (min-width: 901px) {
+        html.${APP}-open[data-tmn-notes-layout="bottom"] [data-app-shell-workspace-row="true"] {
+          box-sizing: border-box !important;
+          padding-bottom: calc(var(--tmn-bottom-height) + 8px) !important;
+          transition: padding-bottom 120ms ease-out;
+        }
+        html[data-tmn-notes-layout="bottom"] #${APP}-panel {
+          left: 8px; top: auto; right: 8px; bottom: 8px; width: auto;
+          height: min(var(--tmn-bottom-height), calc(100dvh - 16px));
+        }
+        html[data-tmn-notes-layout="bottom"] #${APP}-panel .tmn-resizer {
+          left: 12px; right: 12px; top: -6px; bottom: auto;
+          width: auto; height: 12px; cursor: ns-resize;
+        }
+        html[data-tmn-notes-layout="bottom"] #${APP}-panel .tmn-resizer::after {
+          left: 8px; right: 8px; top: 5px; bottom: auto; width: auto; height: 2px;
+        }
+        html[data-tmn-notes-layout="floating"] #${APP}-panel {
+          left: var(--tmn-float-left); top: var(--tmn-float-top);
+          right: auto; bottom: auto;
+          width: var(--tmn-float-width); height: var(--tmn-float-height);
+          max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px);
+        }
+        html[data-tmn-notes-layout="floating"] #${APP}-panel .tmn-resizer {
+          left: auto; top: auto; right: -4px; bottom: -4px;
+          width: 20px; height: 20px; cursor: nwse-resize;
+        }
+        html[data-tmn-notes-layout="floating"] #${APP}-panel .tmn-resizer::after {
+          left: 6px; top: auto; bottom: 6px; right: 5px; width: 9px; height: 9px;
+          background: transparent; border-right: 2px solid rgba(210,210,210,.62);
+          border-bottom: 2px solid rgba(210,210,210,.62); border-radius: 0;
+        }
+      }
+      #${APP}-panel .tmn-header-actions {
+        align-items: center; flex-wrap: wrap; justify-content: flex-end;
+      }
+      #${APP}-panel .tmn-layout-label {font-size: 11px;opacity:.8;}
+      #${APP}-panel .tmn-layout-select {
+        min-width: 90px; padding: 5px; border-radius: 7px;
+        border: 1px solid rgba(127,127,127,.4);
+        background: #303135; color: #f5f5f5;
+        font: 12px ui-sans-serif, system-ui, sans-serif;
+      }
+      #${APP}-panel .tmn-header-actions .tmn-float-drag {
+        width: auto; height: 32px; padding: 0 10px;
+        touch-action: none; cursor: move;
+      }
+      #${APP}-panel .tmn-header-actions .tmn-float-drag[hidden] {
+        display: none !important;
+      }
+
       @media (max-width: 900px) {
         #${APP}-panel {
           top: 4px;
@@ -2321,7 +2388,7 @@
     panel.hidden = true;
 
     panel.innerHTML = `
-      <div class="tmn-resizer" title="Arrastra para cambiar el ancho"></div>
+      <div class="tmn-resizer" title="Arrastra para cambiar el tamaño del panel"></div>
 
       <div class="tmn-header">
         <div class="tmn-heading">
@@ -2336,6 +2403,13 @@
         </div>
 
         <div class="tmn-header-actions">
+          <label class="tmn-layout-label" for="${APP}-layout">Posición</label>
+          <select id="${APP}-layout" class="tmn-layout-select" aria-label="Posición del panel">
+            <option value="side">Lateral</option>
+            <option value="bottom">Abajo</option>
+            <option value="floating">Flotante</option>
+          </select>
+          <button class="tmn-float-drag" type="button" title="Arrastra para mover la ventana, o usa las flechas" aria-label="Mover ventana flotante">Mover</button>
           <button class="tmn-close" type="button" title="Cerrar panel">✕</button>
         </div>
       </div>
@@ -2464,6 +2538,12 @@
       'pointerdown',
       startResize
     );
+    panel.querySelector('.tmn-layout-select').addEventListener('change', event => {
+      setPanelLayout(event.target.value);
+    });
+    const dragHandle = panel.querySelector('.tmn-float-drag');
+    dragHandle.addEventListener('pointerdown', startFloatingDrag);
+    dragHandle.addEventListener('keydown', moveFloatingWithKeyboard);
 
     panel.querySelector('.tmn-close').addEventListener('click', () => {
       setPanelOpen(false);
@@ -2675,6 +2755,142 @@
   }
 
 
+
+  // Layout geometry is independent of note and filesystem state.
+  function normalizedPanelLayout(value) {
+    return ['side', 'bottom', 'floating'].includes(value) ? value : 'side';
+  }
+
+  function boundedPanelNumber(value, fallback, min, max) {
+    const number = Number(value);
+    const finite = Number.isFinite(number) && number > 0 ? number : fallback;
+    return Math.round(Math.max(min, Math.min(finite, Math.max(min, max))));
+  }
+
+  function clampBottomPanelHeight(height, viewportHeight = window.innerHeight) {
+    const maximum = Math.max(180, viewportHeight - 100);
+    const minimum = Math.min(380, maximum);
+    return boundedPanelNumber(height, DEFAULT_BOTTOM_HEIGHT, minimum, maximum);
+  }
+
+  function clampFloatingPanelRect(rect, vw = window.innerWidth, vh = window.innerHeight) {
+    const roomWidth = Math.max(160, vw - PANEL_MARGIN * 2);
+    const roomHeight = Math.max(160, vh - PANEL_MARGIN * 2);
+    const width = boundedPanelNumber(
+      rect?.width, DEFAULT_FLOAT_WIDTH, Math.min(320, roomWidth), roomWidth
+    );
+    const height = boundedPanelNumber(
+      rect?.height, DEFAULT_FLOAT_HEIGHT, Math.min(380, roomHeight), roomHeight
+    );
+    const defaultLeft = Math.max(PANEL_MARGIN, vw - width - 40);
+    const defaultTop = Math.min(96, Math.max(PANEL_MARGIN, vh - height - PANEL_MARGIN));
+    const left = Math.round(Math.max(
+      PANEL_MARGIN, Math.min(
+        Number.isFinite(Number(rect?.left)) ? Number(rect.left) : defaultLeft,
+        Math.max(PANEL_MARGIN, vw - width - PANEL_MARGIN)
+      )
+    ));
+    const top = Math.round(Math.max(
+      PANEL_MARGIN, Math.min(
+        Number.isFinite(Number(rect?.top)) ? Number(rect.top) : defaultTop,
+        Math.max(PANEL_MARGIN, vh - height - PANEL_MARGIN)
+      )
+    ));
+    return { left, top, width, height };
+  }
+
+  function effectivePanelLayout() {
+    // Keep the desktop preference while showing a reachable compact overlay.
+    return window.innerWidth <= 900 ? 'side' : panelLayout;
+  }
+
+  function setBottomPanelHeight(height, persist = true) {
+    bottomPanelHeight = clampBottomPanelHeight(height);
+    document.documentElement.style.setProperty('--tmn-bottom-height', bottomPanelHeight + 'px');
+    if (persist) localStorage.setItem(BOTTOM_HEIGHT_KEY, String(bottomPanelHeight));
+  }
+
+  function setFloatingPanelRect(rect, persist = true) {
+    floatingRect = clampFloatingPanelRect(rect);
+    const root = document.documentElement.style;
+    root.setProperty('--tmn-float-left', floatingRect.left + 'px');
+    root.setProperty('--tmn-float-top', floatingRect.top + 'px');
+    root.setProperty('--tmn-float-width', floatingRect.width + 'px');
+    root.setProperty('--tmn-float-height', floatingRect.height + 'px');
+    if (persist) localStorage.setItem(FLOAT_RECT_KEY, JSON.stringify(floatingRect));
+  }
+
+  function applyPanelLayout() {
+    document.documentElement.dataset.tmnNotesLayout = effectivePanelLayout();
+    if (panel) {
+      const select = panel.querySelector('.tmn-layout-select');
+      if (select) select.value = panelLayout;
+      const grip = panel.querySelector('.tmn-float-drag');
+      if (grip) grip.hidden = effectivePanelLayout() !== 'floating';
+    }
+    setBottomPanelHeight(bottomPanelHeight, false);
+    setFloatingPanelRect(floatingRect, false);
+  }
+
+  function setPanelLayout(value) {
+    panelLayout = normalizedPanelLayout(value);
+    localStorage.setItem(PANEL_LAYOUT_KEY, panelLayout);
+    applyPanelLayout();
+  }
+
+  function restorePanelLayout() {
+    panelLayout = normalizedPanelLayout(localStorage.getItem(PANEL_LAYOUT_KEY));
+    bottomPanelHeight = localStorage.getItem(BOTTOM_HEIGHT_KEY) || DEFAULT_BOTTOM_HEIGHT;
+    try {
+      floatingRect = JSON.parse(localStorage.getItem(FLOAT_RECT_KEY) || 'null');
+    } catch {
+      floatingRect = null;
+    }
+    applyPanelLayout();
+  }
+
+  function startFloatingDrag(event) {
+    if (effectivePanelLayout() !== 'floating' || event.button !== 0) return;
+    event.preventDefault();
+    const startX = event.clientX, startY = event.clientY;
+    const initial = { ...floatingRect };
+    const onMove = move => {
+      if (move.pointerId !== event.pointerId) return;
+      setFloatingPanelRect({
+        ...initial,
+        left: initial.left + (move.clientX - startX),
+        top: initial.top + (move.clientY - startY)
+      }, false);
+    };
+    const finish = move => {
+      if (move.pointerId !== event.pointerId) return;
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', finish, true);
+      window.removeEventListener('pointercancel', finish, true);
+      setFloatingPanelRect(floatingRect, true);
+    };
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', finish, true);
+    window.addEventListener('pointercancel', finish, true);
+  }
+
+  function moveFloatingWithKeyboard(event) {
+    if (effectivePanelLayout() !== 'floating') return;
+    const delta = event.shiftKey ? 60 : 16;
+    const vectors = {
+      ArrowLeft: [-delta, 0], ArrowRight: [delta, 0],
+      ArrowUp: [0, -delta], ArrowDown: [0, delta]
+    };
+    if (!vectors[event.key]) return;
+    event.preventDefault();
+    const [dx, dy] = vectors[event.key];
+    setFloatingPanelRect({
+      ...floatingRect,
+      left: floatingRect.left + dx,
+      top: floatingRect.top + dy
+    });
+  }
+
   function maxPanelWidthForViewport() {
     // Conserva al menos ~420 px para el chat en escritorio.
     return Math.max(
@@ -2720,50 +2936,56 @@
     );
   }
 
+
   function startResize(event) {
-    if (window.innerWidth <= 900) return;
-
+    if (window.innerWidth <= 900 || event.button !== 0) return;
+    const mode = effectivePanelLayout();
     event.preventDefault();
-
     resizing = true;
-    document.documentElement.classList.add(`${APP}-resizing`);
-
-    const startX = event.clientX;
-    const startingWidth = parseFloat(
-      getComputedStyle(document.documentElement)
-        .getPropertyValue('--tmn-notes-width')
-    ) || DEFAULT_PANEL_WIDTH;
-
-    const onMove = moveEvent => {
-      if (!resizing) return;
-
-      // Panel anclado a la derecha:
-      // mover el borde a la izquierda => panel más ancho.
-      const delta = startX - moveEvent.clientX;
-      setPanelWidth(startingWidth + delta, false);
+    document.documentElement.classList.add(APP + '-resizing');
+    const startX = event.clientX, startY = event.clientY;
+    const startWidth = parseFloat(getComputedStyle(document.documentElement)
+      .getPropertyValue('--tmn-notes-width')) || DEFAULT_PANEL_WIDTH;
+    const startBottomHeight = bottomPanelHeight;
+    const startFloat = { ...floatingRect };
+    const onMove = move => {
+      if (!resizing || move.pointerId !== event.pointerId) return;
+      if (mode === 'bottom') {
+        setBottomPanelHeight(startBottomHeight - (move.clientY - startY), false);
+      } else if (mode === 'floating') {
+        // Constrain size to viewport space remaining from the existing origin.
+        setFloatingPanelRect({
+          ...startFloat,
+          width: Math.max(160, Math.min(
+            startFloat.width + move.clientX - startX,
+            window.innerWidth - startFloat.left - PANEL_MARGIN
+          )),
+          height: Math.max(160, Math.min(
+            startFloat.height + move.clientY - startY,
+            window.innerHeight - startFloat.top - PANEL_MARGIN
+          ))
+        }, false);
+      } else {
+        setPanelWidth(startWidth + startX - move.clientX, false);
+      }
     };
-
-    const onUp = () => {
-      if (!resizing) return;
-
+    const finish = move => {
+      if (move.pointerId !== event.pointerId) return;
       resizing = false;
-      document.documentElement.classList.remove(`${APP}-resizing`);
-
-      const finalWidth = parseFloat(
-        getComputedStyle(document.documentElement)
-          .getPropertyValue('--tmn-notes-width')
-      ) || DEFAULT_PANEL_WIDTH;
-
-      setPanelWidth(finalWidth, true);
-
+      document.documentElement.classList.remove(APP + '-resizing');
+      if (mode === 'bottom') setBottomPanelHeight(bottomPanelHeight, true);
+      else if (mode === 'floating') setFloatingPanelRect(floatingRect, true);
+      else setPanelWidth(
+        parseFloat(getComputedStyle(document.documentElement)
+          .getPropertyValue('--tmn-notes-width')) || DEFAULT_PANEL_WIDTH, true
+      );
       window.removeEventListener('pointermove', onMove, true);
-      window.removeEventListener('pointerup', onUp, true);
-      window.removeEventListener('pointercancel', onUp, true);
+      window.removeEventListener('pointerup', finish, true);
+      window.removeEventListener('pointercancel', finish, true);
     };
-
     window.addEventListener('pointermove', onMove, true);
-    window.addEventListener('pointerup', onUp, true);
-    window.addEventListener('pointercancel', onUp, true);
+    window.addEventListener('pointerup', finish, true);
+    window.addEventListener('pointercancel', finish, true);
   }
 
   function setPanelOpen(open) {
@@ -3643,6 +3865,7 @@
     createLauncher();
     createPanel();
     restorePanelWidth();
+    restorePanelLayout();
 
     await loadSavedDirectoryHandle();
 
@@ -3674,10 +3897,10 @@
         getComputedStyle(document.documentElement)
           .getPropertyValue('--tmn-notes-width')
       ) || DEFAULT_PANEL_WIDTH;
-
       setPanelWidth(currentWidth, false);
+      applyPanelLayout();
     });
-    console.info('[Markdown Notes] v1.11.0 cargado', IS_UDEMY ? '(Udemy)' : '(ChatGPT)');
+    console.info('[Markdown Notes] v1.12.0 cargado', IS_UDEMY ? '(Udemy)' : '(ChatGPT)');
   }
 
   bootstrap().catch(error => {

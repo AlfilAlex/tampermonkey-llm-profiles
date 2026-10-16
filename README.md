@@ -47,7 +47,15 @@ Los requisitos del cambio están en
 - Mantiene ON/OFF y perfil seleccionado por conversación.
 
 
-### Markdown Notes v1.11.0 — ChatGPT y Udemy
+### Markdown Notes v1.12.0 — ChatGPT y Udemy
+
+**Posición del panel:** cuando está abierto, el selector **Posición**
+permite elegir **Lateral**, **Abajo** o **Flotante**.
+Lateral mantiene el panel derecho con ancho ajustable; Abajo lo acopla al
+borde inferior con altura ajustable; Flotante permite arrastrarlo con **Mover**
+y redimensionarlo desde la esquina inferior derecha. El modo y el tamaño
+quedan almacenados localmente en cada dominio. En pantallas angostas se usa
+temporalmente un diseño compacto; la preferencia de escritorio se conserva.
 
 **Flujo de notas por conversación:** al abrir el panel puedes elegir **Crear nuevo** o **Elegir existente**. La segunda opción abre la Biblioteca; selecciona un archivo .md y pulsa **Usar como nota activa** para cargarlo en el editor Libre/Cornell. **Guardar cambios** actualiza ese mismo archivo, aunque lo estés usando desde otro chat.
 
