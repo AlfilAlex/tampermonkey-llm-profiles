@@ -1567,6 +1567,138 @@
     })));
   }
 
+
+  function transformOneLine(text, caret, action) {
+    const value = String(text);
+    const parts = value.split(/(\r\n|\n|\r)/);
+    const lines = [];
+    for (let i = 0; i < parts.length; i += 2) {
+      lines.push({text:parts[i],sep:parts[i + 1] || ''});
+    }
+    let index = 0, offset = 0;
+    const clamped = Math.max(0, Math.min(value.length, caret));
+    for (let i = 0; i < lines.length; i++) {
+      if (clamped < offset + lines[i].text.length + lines[i].sep.length ||
+          i === lines.length - 1) {
+        index = i;
+        break;
+      }
+      offset += lines[i].text.length + lines[i].sep.length;
+    }
+    const column = Math.max(0, Math.min(lines[index].text.length,clamped-offset));
+    const original = { ...lines[index] };
+    const eol = value.match(/\r\n|\n|\r/)?.[0] || '\n';
+    let target = index;
+    let cutText = null;
+    if (action === 'cut' || action === 'delete') {
+      cutText = original.text + (original.sep || eol);
+      if (lines.length === 1) {
+        lines[0] = {text:'',sep:''};
+      } else if (index === lines.length - 1 && !original.sep) {
+        lines.splice(index,1);
+        lines[lines.length - 1].sep = '';
+        target = lines.length - 1;
+      } else {
+        lines.splice(index,1);
+        target = Math.min(index,lines.length - 1);
+      }
+    } else if (action === 'duplicateUp' || action === 'duplicateDown') {
+      if (action === 'duplicateUp') {
+        lines.splice(index,0,{text:original.text,sep:original.sep || eol});
+        target = index;
+      } else if (original.sep) {
+        lines.splice(index+1,0,{text:original.text,sep:original.sep});
+        target = index+1;
+      } else {
+        lines[index].sep = eol;
+        lines.splice(index+1,0,{text:original.text,sep:''});
+        target = index+1;
+      }
+    } else if (action === 'up' || action === 'down') {
+      const adjacent = index+(action === 'up' ? -1:1);
+      if (adjacent < 0 || adjacent >= lines.length) {
+        return {text:value,caret:clamped,cutText:null};
+      }
+      [lines[index].text,lines[adjacent].text] =
+        [lines[adjacent].text,lines[index].text];
+      target = adjacent;
+    } else {
+      return {text:value,caret:clamped,cutText:null};
+    }
+    let newOffset = 0;
+    for (let i = 0; i < target; i++)
+      newOffset += lines[i].text.length+lines[i].sep.length;
+    return {
+      text:lines.map(line => line.text+line.sep).join(''),
+      caret:newOffset+Math.min(column,lines[target].text.length),
+      cutText
+    };
+  }
+
+  function minimalTextChange(before, after) {
+    let from = 0;
+    while (from < before.length && from < after.length && before[from] === after[from])
+      from += 1;
+    let oldTo = before.length, newTo = after.length;
+    while (oldTo > from && newTo > from &&
+      before[oldTo-1] === after[newTo-1]) {
+      oldTo -= 1; newTo -= 1;
+    }
+    return {from, to:oldTo, replacement:after.slice(from,newTo)};
+  }
+
+  function runAdvancedLineEdit(cm, action) {
+    const before = cm.getValue();
+    const result = transformOneLine(
+      before,cm.indexFromPos(cm.getCursor('head')),action
+    );
+    if (before === result.text) return;
+    const edit = minimalTextChange(before,result.text);
+    cm.replaceRange(edit.replacement,cm.posFromIndex(edit.from),cm.posFromIndex(edit.to),'+line-edit');
+    cm.setCursor(cm.posFromIndex(result.caret));
+  }
+
+  function runNativeLineEdit(target, action) {
+    if (!isMarkdownTextarea(target)) return;
+    const before = target.value;
+    const result = transformOneLine(before,target.selectionStart,action);
+    if (before === result.text) return;
+    const edit = minimalTextChange(before,result.text);
+    target.setRangeText(edit.replacement,edit.from,edit.to,'preserve');
+    target.setSelectionRange(result.caret,result.caret);
+    rememberMarkdownSelection(target);
+    target.dispatchEvent(new Event('input',{bubbles:true,composed:true}));
+  }
+
+  function cutWholeLineFromTarget(event,target,cm=null,line=null) {
+    if (!event.clipboardData || !isMarkdownTextarea(target)) return false;
+    const before = cm ? cm.getValue() : target.value;
+    const caret = cm
+      ? cm.indexFromPos({line,ch:0})
+      : target.selectionStart;
+    const result = transformOneLine(before,caret,'cut');
+    if (result.text === before && !before.length) return false;
+    event.preventDefault();
+    event.stopPropagation();
+    event.clipboardData.setData('text/plain',result.cutText || '');
+    if (cm) {
+      const edit = minimalTextChange(before,result.text);
+      cm.replaceRange(edit.replacement,cm.posFromIndex(edit.from),cm.posFromIndex(edit.to),'+cut-line');
+      cm.setCursor(cm.posFromIndex(result.caret));
+    } else {
+      runNativeLineEdit(target,'cut');
+    }
+    return true;
+  }
+
+  function handleNativeLineCut(event) {
+    const target = event.target;
+    if (!isMarkdownTextarea(target) ||
+        !isMarkdownTargetForActiveMode(target) ||
+        target.selectionStart !== target.selectionEnd) return;
+    cutWholeLineFromTarget(event,target);
+  }
+
   function isMarkdownTextarea(target) {
     return target instanceof HTMLTextAreaElement && (
       target.classList.contains('tmn-editor') ||
@@ -2821,6 +2953,7 @@
       }
     };
 
+    panel.addEventListener('cut', handleNativeLineCut, true);
     panel.addEventListener('focusin', rememberSelectionFromEvent);
     panel.addEventListener('select', rememberSelectionFromEvent);
     panel.addEventListener('keyup', rememberSelectionFromEvent);
@@ -4023,6 +4156,22 @@
 
       applyMarkdownAction(action);
       return;
+    }
+
+    if (isMarkdownTargetForActiveMode(event.target)) {
+      let action = null;
+      if (modifier && event.shiftKey && !event.altKey && key === 'k')
+        action = 'delete';
+      else if (!modifier && event.altKey) {
+        if (key === 'arrowup') action = event.shiftKey ? 'duplicateUp' : 'up';
+        else if (key === 'arrowdown') action = event.shiftKey ? 'duplicateDown' : 'down';
+      }
+      if (action) {
+        event.preventDefault();
+        event.stopPropagation();
+        runNativeLineEdit(event.target,action);
+        return;
+      }
     }
 
     const isSave = modifier && key === 's';
