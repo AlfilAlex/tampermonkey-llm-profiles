@@ -542,9 +542,16 @@
     if (!editor) return false;
 
     // Do not let focusing the fixed notes panel move ChatGPT's page viewport.
-    editor.focus({ preventScroll: true });
-    editor.setSelectionRange(start, end);
-    rememberMarkdownSelection(editor);
+    if (advancedEditorEnabled && advancedEditor) {
+      advancedEditor.setSelection(
+        advancedEditor.posFromIndex(start),advancedEditor.posFromIndex(end)
+      );
+      advancedEditor.focus();
+    } else {
+      editor.focus({ preventScroll: true });
+      editor.setSelectionRange(start, end);
+      rememberMarkdownSelection(editor);
+    }
     return true;
   }
 
@@ -1768,6 +1775,14 @@
   function selectionForTarget(target) {
     const valueLength = target.value.length;
 
+    if (advancedEditorEnabled && advancedEditor &&
+        target.classList.contains('tmn-editor')) {
+      return {
+        start: advancedEditor.indexFromPos(advancedEditor.getCursor('from')),
+        end: advancedEditor.indexFromPos(advancedEditor.getCursor('to'))
+      };
+    }
+
     if (markdownSelection?.target === target) {
       return {
         start: Math.max(0, Math.min(markdownSelection.start, valueLength)),
@@ -1782,8 +1797,23 @@
   }
 
   function commitMarkdownEdit(target, start, end, replacement, selectionStart, selectionEnd) {
+    if (advancedEditorEnabled && advancedEditor &&
+        target.classList.contains('tmn-editor')) {
+      advancedEditor.replaceRange(
+        replacement,advancedEditor.posFromIndex(start),
+        advancedEditor.posFromIndex(end),'+markdown-format'
+      );
+      const a = Number.isInteger(selectionStart)
+        ? selectionStart : start + replacement.length;
+      const b = Number.isInteger(selectionEnd) ? selectionEnd : a;
+      advancedEditor.setSelection(
+        advancedEditor.posFromIndex(a), advancedEditor.posFromIndex(b)
+      );
+      advancedEditor.focus();
+      return;
+    }
     target.setRangeText(replacement, start, end, 'end');
-    target.focus();
+    target.focus({ preventScroll: true });
 
     const nextStart = Number.isInteger(selectionStart)
       ? selectionStart
@@ -2243,6 +2273,30 @@
         color: #151515;
         opacity: 1;
       }
+
+      #${APP}-panel .tmn-advanced-bar {
+        display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+        padding: 6px 10px; border-bottom: 1px solid rgba(127,127,127,.18);
+        font-size: 11px;
+      }
+      #${APP}-panel .tmn-advanced-bar[hidden] {display:none!important;}
+      #${APP}-panel .tmn-advanced-help {opacity:.7;}
+      #${APP}-panel .CodeMirror {
+        box-sizing: border-box; flex: 1; min-height: 120px;
+        height: 100%; width: 100%;
+        border: 1px solid rgba(127,127,127,.25);
+        border-radius: 10px; background: #151617; color: #f5f5f5;
+        font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+      #${APP}-panel .CodeMirror-gutters {
+        background: #1d1e20;
+        border-right: 1px solid rgba(127,127,127,.25);
+      }
+      #${APP}-panel .CodeMirror-linenumber {color:#8e949e;}
+      #${APP}-panel .CodeMirror-cursor {border-left-color:#fafafa;}
+      #${APP}-panel .CodeMirror-selected {background:rgba(96,149,245,.35);}
+      #${APP}-panel .CodeMirror-focused .CodeMirror-selected {background:rgba(96,149,245,.42);}
+      #${APP}-panel .CodeMirror[hidden] {display:none!important;}
 
       #${APP}-panel .tmn-markdown-toolbar {
         display: flex;
