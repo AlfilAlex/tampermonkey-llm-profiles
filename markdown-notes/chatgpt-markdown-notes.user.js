@@ -682,9 +682,7 @@
         caret += 1;
       }
 
-      editor.focus();
-      editor.setSelectionRange(caret, caret);
-      rememberMarkdownSelection(editor);
+      selectRangeInFreeformEditor(caret, caret);
     });
   }
 
@@ -1427,6 +1425,12 @@
     if (advancedEditorEnabled && !initializeAdvancedEditor()) {
       advancedEditorEnabled = false;
       setStatus('No se pudo iniciar CodeMirror. El editor nativo sigue disponible.', 'error');
+    }
+    if (!advancedEditorEnabled && advancedEditor) {
+      advancedEditor.toTextArea();
+      advancedEditor = null;
+      const editor = panel?.querySelector('.tmn-editor');
+      if (editor) editor.style.display = '';
     }
     localStorage.setItem(ADVANCED_EDITOR_KEY, advancedEditorEnabled ? '1' : '0');
     renderEditor();
