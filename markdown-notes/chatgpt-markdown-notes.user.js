@@ -1408,6 +1408,165 @@
   // Herramientas Markdown
   // ===========================================================================
 
+
+  function restoreAdvancedEditorPreference() {
+    advancedEditorEnabled = localStorage.getItem(ADVANCED_EDITOR_KEY) === '1';
+    if (advancedEditorEnabled) initializeAdvancedEditor();
+    renderAdvancedEditor();
+  }
+
+  function setAdvancedEditorEnabled(enabled) {
+    advancedEditorEnabled = Boolean(enabled);
+    if (advancedEditorEnabled && !initializeAdvancedEditor()) {
+      advancedEditorEnabled = false;
+      setStatus('No se pudo iniciar CodeMirror. El editor nativo sigue disponible.', 'error');
+    }
+    localStorage.setItem(ADVANCED_EDITOR_KEY, advancedEditorEnabled ? '1' : '0');
+    renderEditor();
+  }
+
+  function initializeAdvancedEditor() {
+    if (advancedEditor) return true;
+    if (!panel || typeof CodeMirror === 'undefined') return false;
+    try {
+      if (!advancedEditorStyleLoaded) {
+        const css = typeof GM_getResourceText === 'function'
+          ? GM_getResourceText('tmnCodeMirrorCss') : '';
+        if (!css) return false;
+        const style = document.createElement('style');
+        style.id = APP + '-codemirror-css';
+        style.textContent = css;
+        document.head.appendChild(style);
+        advancedEditorStyleLoaded = true;
+      }
+      const textarea = panel.querySelector('.tmn-editor');
+      advancedEditor = CodeMirror.fromTextArea(textarea, {
+        lineNumbers: true,
+        lineWrapping: true,
+        indentUnit: 2,
+        tabSize: 2,
+        autofocus: false,
+        viewportMargin: 10,
+        extraKeys: {
+          'Ctrl-D': cm => selectNextOccurrence(cm),
+          'Cmd-D': cm => selectNextOccurrence(cm),
+          'Shift-Ctrl-L': cm => selectAllOccurrences(cm),
+          'Shift-Cmd-L': cm => selectAllOccurrences(cm),
+          'Ctrl-Shift-K': cm => runAdvancedLineEdit(cm, 'delete'),
+          'Cmd-Shift-K': cm => runAdvancedLineEdit(cm, 'delete'),
+          'Alt-Up': cm => runAdvancedLineEdit(cm, 'up'),
+          'Alt-Down': cm => runAdvancedLineEdit(cm, 'down'),
+          'Shift-Alt-Up': cm => runAdvancedLineEdit(cm, 'duplicateUp'),
+          'Shift-Alt-Down': cm => runAdvancedLineEdit(cm, 'duplicateDown'),
+          'Ctrl-S': () => saveFile(),
+          'Cmd-S': () => saveFile(),
+          'Ctrl-B': () => applyMarkdownAction('bold'),
+          'Cmd-B': () => applyMarkdownAction('bold'),
+          'Ctrl-I': () => applyMarkdownAction('italic'),
+          'Cmd-I': () => applyMarkdownAction('italic'),
+          'Ctrl-K': () => applyMarkdownAction('link'),
+          'Cmd-K': () => applyMarkdownAction('link')
+        }
+      });
+      advancedEditor.on('change', cm => {
+        if (syncingAdvancedEditor || !advancedEditorEnabled) return;
+        textarea.value = cm.getValue();
+        textarea.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
+      });
+      advancedEditor.on('cursorActivity', cm => {
+        const from = cm.indexFromPos(cm.getCursor('from'));
+        const to = cm.indexFromPos(cm.getCursor('to'));
+        markdownSelection = { target: textarea, start: from, end: to };
+      });
+      advancedEditor.getWrapperElement().addEventListener('cut', event => {
+        if (advancedEditor?.somethingSelected()) return;
+        const line = advancedEditor.getCursor().line;
+        cutWholeLineFromTarget(event, textarea, advancedEditor, line);
+      }, true);
+      advancedEditor.on('mousedown', (cm, event) => {
+        if (!event.altKey || event.button !== 0) return;
+        // Alt+click adds a real extra cursor, rather than replacing the old one.
+        const cursor = cm.coordsChar({left: event.clientX, top: event.clientY}, 'window');
+        event.preventDefault();
+        event.stopPropagation();
+        cm.addSelection(cursor);
+        cm.focus();
+      });
+      return true;
+    } catch (error) {
+      console.warn('[Markdown Notes] CodeMirror initialization failed:', error);
+      advancedEditor = null;
+      return false;
+    }
+  }
+
+  function renderAdvancedEditor() {
+    if (!panel) return;
+    const bar = panel.querySelector('.tmn-advanced-bar');
+    if (bar) bar.hidden = activeState?.noteMode !== 'freeform';
+    const toggle = panel.querySelector('.tmn-advanced-toggle');
+    if (toggle) toggle.checked = advancedEditorEnabled;
+  }
+
+  function selectionWordAt(value, position) {
+    const offset = Math.max(0, Math.min(value.length, position));
+    let from = offset;
+    let to = offset;
+    while (from > 0 && /[\p{L}\p{N}_]/u.test(value[from - 1])) from -= 1;
+    while (to < value.length && /[\p{L}\p{N}_]/u.test(value[to])) to += 1;
+    return {from, to};
+  }
+
+  function findOccurrences(value, needle, limit = 1000) {
+    if (!needle) return [];
+    const matches = [];
+    let index = 0, at;
+    while ((at = value.indexOf(needle, index)) !== -1 && matches.length < limit) {
+      matches.push({from: at, to: at + needle.length});
+      index = at + needle.length;
+    }
+    return matches;
+  }
+
+  function selectNextOccurrence(cm) {
+    const doc = cm.getDoc(), value = doc.getValue();
+    const head = cm.getCursor('head');
+    let range = {
+      from: doc.indexFromPos(cm.getCursor('from')),
+      to: doc.indexFromPos(cm.getCursor('to'))
+    };
+    if (range.from === range.to) {
+      range = selectionWordAt(value, doc.indexFromPos(head));
+      if (range.from === range.to) return;
+      doc.setSelection(doc.posFromIndex(range.from), doc.posFromIndex(range.to));
+      return;
+    }
+    const selected = value.slice(range.from, range.to);
+    const selections = doc.listSelections().map(item=>({
+      from: doc.indexFromPos(item.from()),
+      to: doc.indexFromPos(item.to())
+    }));
+    const matches = findOccurrences(value, selected);
+    const next = matches.find(m => m.from >= range.to &&
+      !selections.some(sel => sel.from === m.from && sel.to === m.to)) ||
+      matches.find(m => !selections.some(sel => sel.from === m.from && sel.to === m.to));
+    if (next) doc.addSelection(doc.posFromIndex(next.from), doc.posFromIndex(next.to));
+  }
+
+  function selectAllOccurrences(cm) {
+    const doc = cm.getDoc(), value = doc.getValue();
+    let from = doc.indexFromPos(cm.getCursor('from'));
+    let to = doc.indexFromPos(cm.getCursor('to'));
+    if (from === to) ({from,to}=selectionWordAt(value,from));
+    if (from === to) return;
+    const ranges = findOccurrences(value,value.slice(from,to));
+    if (!ranges.length) return;
+    doc.setSelections(ranges.map(range=>({
+      anchor: doc.posFromIndex(range.from),
+      head: doc.posFromIndex(range.to)
+    })));
+  }
+
   function isMarkdownTextarea(target) {
     return target instanceof HTMLTextAreaElement && (
       target.classList.contains('tmn-editor') ||
