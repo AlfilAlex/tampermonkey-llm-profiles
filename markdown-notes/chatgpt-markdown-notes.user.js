@@ -546,7 +546,7 @@
       advancedEditor.setSelection(
         advancedEditor.posFromIndex(start),advancedEditor.posFromIndex(end)
       );
-      advancedEditor.focus();
+      advancedEditor.getInputField().focus({ preventScroll: true });
     } else {
       editor.focus({ preventScroll: true });
       editor.setSelectionRange(start, end);
@@ -1986,6 +1986,20 @@
   }
 
   function applyMarkdownAction(action) {
+    if (advancedEditorEnabled && advancedEditor &&
+        activeState?.noteMode === 'freeform' &&
+        advancedEditor.getDoc().listSelections().length > 1 &&
+        ['bold','italic','inlineCode','link'].includes(action)) {
+      const wraps = {
+        bold: text => '**' + (text || 'texto') + '**',
+        italic: text => '*' + (text || 'texto') + '*',
+        inlineCode: text => String.fromCharCode(96) + (text || 'código') + String.fromCharCode(96),
+        link: text => '[' + (text || 'texto') + '](https://)'
+      };
+      advancedEditor.replaceSelections(advancedEditor.getSelections().map(wraps[action]), 'around');
+      advancedEditor.getInputField().focus({ preventScroll: true });
+      return;
+    }
     const actions = {
       bold: () => applyInlineWrapper('**', '**', 'texto'),
       italic: () => applyInlineWrapper('*', '*', 'texto'),
@@ -3373,7 +3387,8 @@
     if (!panel || !activeState) return;
 
     if (activeState.noteMode === 'freeform') {
-      if (advancedEditorEnabled && advancedEditor) advancedEditor.focus();
+      if (advancedEditorEnabled && advancedEditor)
+        advancedEditor.getInputField().focus({ preventScroll: true });
       else panel.querySelector('.tmn-editor')?.focus({ preventScroll: true });
       return;
     }
