@@ -1,15 +1,17 @@
 // ==UserScript==
 // @name         ChatGPT Markdown Notes
 // @namespace    https://chatgpt.com/
-// @version      1.12.0
+// @version      1.13.0
 // @description  Notas Markdown locales por conversación ChatGPT o video de Udemy, con Cornell y biblioteca.
 // @match        https://chatgpt.com/*
 // @match        https://chat.openai.com/*
 // @match        https://www.udemy.com/*
 // @updateURL    https://raw.githubusercontent.com/AlfilAlex/tampermonkey-llm-profiles/master/markdown-notes/chatgpt-markdown-notes.user.js
 // @downloadURL  https://raw.githubusercontent.com/AlfilAlex/tampermonkey-llm-profiles/master/markdown-notes/chatgpt-markdown-notes.user.js
+// @require      https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.21/codemirror.min.js
+// @resource     tmnCodeMirrorCss https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.21/codemirror.min.css
 // @run-at       document-idle
-// @grant        none
+// @grant        GM_getResourceText
 // ==/UserScript==
 
 (function () {
@@ -31,6 +33,7 @@
   const PANEL_LAYOUT_KEY = `${APP}:panel-layout`;
   const BOTTOM_HEIGHT_KEY = `${APP}:bottom-height`;
   const FLOAT_RECT_KEY = `${APP}:float-rect`;
+  const ADVANCED_EDITOR_KEY = `${APP}:advanced-editor`;
   const DEFAULT_PANEL_WIDTH = 430;
   const MIN_PANEL_WIDTH = 300;
   const MAX_PANEL_WIDTH = 760;
@@ -64,6 +67,10 @@
   let reviewRevealed = false;
 
   let markdownSelection = null;
+  let advancedEditorEnabled = false;
+  let advancedEditor = null;
+  let syncingAdvancedEditor = false;
+  let advancedEditorStyleLoaded = false;
 
   // ===========================================================================
   // IndexedDB
@@ -2452,6 +2459,10 @@
         <button type="button" role="tab" data-mode="review">Repaso</button>
       </div>
 
+      <div class="tmn-advanced-bar">
+        <label><input class="tmn-advanced-toggle" type="checkbox"> Editor avanzado (multicursor)</label>
+        <span class="tmn-advanced-help" title="Ctrl/Cmd+D siguiente coincidencia; Ctrl/Cmd+Shift+L todas; Alt+clic cursor adicional; Ctrl/Cmd+X cortar línea; Alt+↑/↓ mover; Shift+Alt+↑/↓ duplicar">Atajos de VS Code</span>
+      </div>
       <div class="tmn-markdown-toolbar" role="toolbar" aria-label="Formato Markdown">
         <button type="button" data-md-action="bold" aria-label="Negrita" title="Negrita (Ctrl/Cmd+B)"><strong>B</strong></button>
         <button type="button" data-md-action="italic" aria-label="Cursiva" title="Cursiva (Ctrl/Cmd+I)"><em>I</em></button>
@@ -2544,6 +2555,10 @@
     const dragHandle = panel.querySelector('.tmn-float-drag');
     dragHandle.addEventListener('pointerdown', startFloatingDrag);
     dragHandle.addEventListener('keydown', moveFloatingWithKeyboard);
+
+    panel.querySelector('.tmn-advanced-toggle').addEventListener('change', event => {
+      setAdvancedEditorEnabled(event.target.checked);
+    });
 
     panel.querySelector('.tmn-close').addEventListener('click', () => {
       setPanelOpen(false);
@@ -3008,7 +3023,8 @@
     if (!panel || !activeState) return;
 
     if (activeState.noteMode === 'freeform') {
-      panel.querySelector('.tmn-editor')?.focus({ preventScroll: true });
+      if (advancedEditorEnabled && advancedEditor) advancedEditor.focus();
+      else panel.querySelector('.tmn-editor')?.focus({ preventScroll: true });
       return;
     }
 
@@ -3521,6 +3537,7 @@
     if (!panel || !activeState) return;
 
     renderMarkdownToolbar();
+    renderAdvancedEditor();
     renderCornellStructureAssistant();
 
     const editor = panel.querySelector('.tmn-editor');
@@ -3528,13 +3545,22 @@
     const review = panel.querySelector('.tmn-review');
 
     const mode = activeState.noteMode;
-    editor.hidden = mode !== 'freeform';
+    editor.hidden = mode !== 'freeform' || advancedEditorEnabled && Boolean(advancedEditor);
+    if (advancedEditor) {
+      advancedEditor.getWrapperElement().hidden = mode !== 'freeform' || !advancedEditorEnabled;
+      if (mode === 'freeform' && advancedEditorEnabled) {
+        requestAnimationFrame(() => advancedEditor?.refresh());
+      }
+    }
     cornell.hidden = mode !== 'cornell';
     review.hidden = mode !== 'review';
 
     if (mode === 'freeform') {
-      if (editor.value !== activeState.body) {
-        editor.value = activeState.body;
+      if (editor.value !== activeState.body) editor.value = activeState.body;
+      if (advancedEditor && advancedEditor.getValue() !== activeState.body) {
+        syncingAdvancedEditor = true;
+        try { advancedEditor.setValue(activeState.body); }
+        finally { syncingAdvancedEditor = false; }
       }
       return;
     }
@@ -3866,6 +3892,7 @@
     createPanel();
     restorePanelWidth();
     restorePanelLayout();
+    restoreAdvancedEditorPreference();
 
     await loadSavedDirectoryHandle();
 
@@ -3900,7 +3927,7 @@
       setPanelWidth(currentWidth, false);
       applyPanelLayout();
     });
-    console.info('[Markdown Notes] v1.12.0 cargado', IS_UDEMY ? '(Udemy)' : '(ChatGPT)');
+    console.info('[Markdown Notes] v1.13.0 cargado', IS_UDEMY ? '(Udemy)' : '(ChatGPT)');
   }
 
   bootstrap().catch(error => {
