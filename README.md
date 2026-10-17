@@ -47,7 +47,22 @@ Los requisitos del cambio están en
 - Mantiene ON/OFF y perfil seleccionado por conversación.
 
 
-### Markdown Notes v1.12.0 — ChatGPT y Udemy
+### Markdown Notes v1.13.0 — ChatGPT y Udemy
+
+**Edición estilo VS Code:** en **Libre**, activa **Editor avanzado (multicursor)**
+para usar selecciones independientes con **Ctrl/Cmd+D** (siguiente coincidencia),
+**Ctrl/Cmd+Shift+L** (todas) y **Alt+clic** (cursor adicional). También incluye
+**Ctrl/Cmd+X** sin selección para cortar la línea completa, **Ctrl/Cmd+Shift+K**
+para eliminar una línea, **Alt+↑/↓** para moverla y **Shift+Alt+↑/↓**
+para duplicarla. Los últimos comandos también funcionan en los campos Markdown
+de Cornell, pero **la selección múltiple es exclusiva de Libre avanzado**.
+El editor nativo puede recuperarse desmarcando la opción.
+
+**Dependencia:** CodeMirror 5.65.21, cargado por Tampermonkey desde cdnjs
+(`@require` y `@resource`). CodeMirror 5 quedó archivado; preferimos un
+modo optativo y conservamos el textarea como alternativa mientras se evalúa
+una migración a CodeMirror 6. La instalación/actualización necesita descargar
+los recursos externos una vez y la UI requiere pruebas reales en navegador.
 
 **Posición del panel:** cuando está abierto, el selector **Posición**
 permite elegir **Lateral**, **Abajo** o **Flotante**.
